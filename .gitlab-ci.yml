@@ -1,0 +1,14 @@
+---
+
+variables:
+  CI_SKIP_STATIC_ANALYSIS: "yes"
+  CI_SKIP_SYSTEM_UNIT_TESTS: "yes"
+  CI_SKIP_VENV_UNIT_TESTS: "yes"
+  CI_SKIP_COVERAGE: "yes"
+  CI_EL9: "yes"
+
+include:
+  - project: 'dpres/gitlab-ci-pipeline'
+    ref: master
+    file:
+      - '/pipeline/common.yml'
