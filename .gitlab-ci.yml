@@ -1,6 +1,7 @@
 ---
 
 variables:
+  GIT_DEPTH: "0"
   CI_SKIP_STATIC_ANALYSIS: "yes"
   CI_SKIP_SYSTEM_UNIT_TESTS: "yes"
   CI_SKIP_VENV_UNIT_TESTS: "yes"
