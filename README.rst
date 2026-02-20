@@ -15,21 +15,36 @@ How it works
 csc-ice version. The spec installs it as a Python package. No token is needed
 to build the RPM locally or in CI.
 
+This is treated as a 3rd-party library since it originates from a different
+GitLab project (``fairdata/csc-ice``). The RPM ``Version`` is therefore
+hardcoded in the spec to match the upstream csc-ice version, rather than being
+derived from git tags. 
+
+If a local patch is needed, increment ``Release`` instead:
+
+```diff
+- Release:        <n>%{?dist}
++ Release:        <n+1>%{?dist}
+```
+
+In practice patches should go upstream, so updates are made directly
+to ``Version``.
+
 Updating the upstream version
 ------------------------------
 
-1. Copy the updated file from a local clone of ``fairdata/csc-ice``::
+1. Bump ``Version`` in
+   ``include/rhel9/SPECS/python3-tapest-ice-api-client.spec.m4`` to the new version.
+2. Copy the updated file from a local clone of ``fairdata/csc-ice``::
 
        cp ../csc-ice/core/ice_api_client.py include/rhel9/SOURCES/ice_api_client.py
 
-2. Commit the updated ``include/rhel9/SOURCES/ice_api_client.py``.
+3. Commit both changes.
 
 Releasing
 ---------
 
-After merging to master, tag the repository following semantic versioning::
+After merging to master, tag the repository to match the upstream csc-ice version::
 
     git tag -a v<major>.<minor>.<patch> -m 'Version <major>.<minor>.<patch>'
     git push -u origin v<major>.<minor>.<patch>
-
-The tag drives the RPM ``Version`` field via the build scripts.
