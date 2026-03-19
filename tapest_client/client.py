@@ -1,6 +1,6 @@
 #--------------------------------------------------------------------------------
-# This file is part of ICE – Ingest · Check · Extract
-# The CSC Cold Storage Service for Digital Preservation
+# This file is part of TapeSt – Tape Storage
+# The CSC Digital Preservation Tape Storage Service
 #
 # Copyright (C) 2025 CSC - IT Center for Science Ltd.
 #
@@ -21,10 +21,8 @@
 # @license GNU Affero General Public License, version 3
 # @link https://www.csc.fi/
 #--------------------------------------------------------------------------------
-# This file provides a baseline client library of functions for interacting with
-# the ICE service. It expects a configuration dictionary to be provided to most
-# functions, which defines both required and optional details. Defaults are shown
-# for optional fields:
+# TapeSt API client library. Provides functions for interacting with the TapeSt
+# API service. Expects a configuration dictionary with the following keys:
 # {
 #     "ICE_TOKEN": "<token>",                # required
 #     "STORAGE_ACCOUNT_NAME": "<name>"       # required for trusted agents
@@ -33,12 +31,6 @@
 #     "DEFAULT_SLEEP_DURATION": 120,         # optional
 #     "CLEANUP_ON_FAIL": True,               # optional
 # }
-#--------------------------------------------------------------------------------
-# Note: The file has no hard dependencies with the ICE implementation and can
-# be easily copied into any code base using Python 3.9 or later and for which
-# the requests and urllib3 libraries are available:
-# 
-# pip install requests urllib3
 #--------------------------------------------------------------------------------
 
 from __future__ import annotations
@@ -180,7 +172,7 @@ def ingest_file(config: dict, identifier: str, local_file_pathname: str, storage
         config (dict): Configuration dictionary with ICE parameters and settings.
         identifier (str): Identifier of the file to be ingested.
         local_file_pathname (str): Local pathname of the file to be ingested.
-        storage_name (str): Optional storage name, used for multi-storage and/or tape configurations.
+        storage_name (str): Optional storage name, used for tape configurations.
 
     Returns:
         The metadata description of the ingested file.
@@ -256,7 +248,7 @@ def recache_file(config: dict, identifier: str, local_file_pathname: str, storag
         config (dict): Configuration dictionary with ICE parameters and settings.
         identifier (str): Identifier of the file to be recached.
         local_file_pathname (str): Local pathname of the file to be recached.
-        storage_name (str): Optional storage name, used for multi-storage configurations.
+        storage_name (str): Optional storage name, used for tape configurations.
 
     Returns:
         The metadata description of the recached file.
@@ -337,7 +329,7 @@ def extract_file(config: dict, identifier: str, local_file_pathname: str, next_i
         identifier (str): Identifier of the file to be extracted.
         local_file_pathname (str): Local pathname to where the extracted file will be saved.
         next_identifier (str): Identifier of the next file to be extracted, if any.
-        storage_name (str): Optional storage name, used for multi-storage and/or tape configurations.
+        storage_name (str): Optional storage name, used for tape configurations.
 
     Returns:
         The file metadata of the extracted file.
@@ -358,7 +350,7 @@ def extract_file_with_metadata(config: dict, file_metadata: dict, local_file_pat
         file_metadata (dict): File metadata description.
         local_file_pathname (str): Local pathname to where the extracted file will be saved.
         next_identifier (str): Identifier of the next file to be extracted, if any.
-        storage_name (str): Optional storage name, used for multi-storage and/or tape configurations.
+        storage_name (str): Optional storage name, used for tape configurations.
 
     Returns:
         The file metadata of the extracted file.
@@ -451,7 +443,7 @@ def delete_file(config: dict, identifier: str, storage_name: str = None) -> None
     Args:
         config (dict): Configuration dictionary with ICE parameters and settings.
         identifier (str): Identifier of the file to be deleted.
-        storage_name (str): Optional storage name, used for multi-storage and/or tape configurations.
+        storage_name (str): Optional storage name, used for tape configurations.
 
     Returns:
         None
@@ -486,7 +478,7 @@ def retrieve_file_metadata(config: dict, identifier: str, storage_name: str = No
     Args:
         config (dict): Configuration dictionary with ICE parameters and settings.
         identifier (str): Identifier of the file for which metadata is to be retrieved.
-        storage_name (str): Optional storage name, used for multi-storage and/or tape configurations.
+        storage_name (str): Optional storage name, used for tape configurations.
 
     Returns:
         dict: The file metadata.
@@ -522,7 +514,7 @@ def update_file_metadata(config: dict, identifier: str, file_metadata_update: di
         config (dict): Configuration dictionary with ICE parameters and settings.
         identifier (str): Identifier of the file for which metadata is to be updated.
         file_metadata_update (dict): Partial file metadata description containing the metadata to be updated.
-        storage_name (str): Optional storage name, used for multi-storage and/or tape configurations.
+        storage_name (str): Optional storage name, used for tape configurations.
 
     Returns:
         dict: The complete and updated file metadata.
@@ -559,7 +551,7 @@ def retrieve_metadata(config: dict, query: dict = {}, storage_name: str = None) 
     Args:
         config (dict): Configuration dictionary with ICE parameters and settings.
         query (dict): Optional dictionary defining the query parameters, if any.
-        storage_name (str): Optional storage name, used for multi-storage and/or tape configurations.
+        storage_name (str): Optional storage name, used for tape configurations.
 
     Returns:
         dict: The metadata query results.
@@ -654,13 +646,14 @@ def ingest_files_from_directory(config: dict, local_directory_pathname: str, ski
         raise Exception("Root directory pathname cannot be empty")
     if not (os.path.exists(local_directory_pathname) and os.path.isdir(local_directory_pathname)):
         raise Exception("Root directory must exist")
-    local_directory_pathname = os.path.basename(os.path.normpath(local_directory_pathname))
+    local_directory_pathname = os.path.normpath(local_directory_pathname)
+    directory_basename = os.path.basename(local_directory_pathname)
     ingested_files = []
     for dirpath, _, filenames in os.walk(local_directory_pathname):
         for filename in filenames:
             local_file_pathname = os.path.join(dirpath, filename)
             relative_path = os.path.normpath(os.path.relpath(local_file_pathname, local_directory_pathname))
-            identifier = "/" + os.path.join(local_directory_pathname, relative_path).replace(os.sep, "/")
+            identifier = "/" + os.path.join(directory_basename, relative_path).replace(os.sep, "/")
             try:
                 file_metadata = retrieve_file_metadata(config, identifier)
                 conflict = True
