@@ -31,6 +31,27 @@ config = {
 metadata = extract_file(config, "/path/to/file", "/local/path")
 ```
 
+## Testing
+
+```
+pip install -e .[testing]
+pytest
+```
+
+### Benchmarks
+
+SHA-256 buffer size benchmark using pytest-benchmark:
+
+```
+pytest benchmarks/test_benchmark_checksum.py --benchmark-enable -v
+```
+
+To benchmark on a specific directory (e.g. GlusterFS):
+
+```
+BENCHMARK_DIR=/mnt/cache_vol/tapest pytest benchmarks/test_benchmark_checksum.py --benchmark-enable -v
+```
+
 ## Releasing
 
 Tag the repository with the version matching `setup.cfg`:

@@ -7,8 +7,7 @@ except ImportError:
     __version__ = "unknown"
 
 from .client import (
-    normalize_timestamp,
-    generate_timestamp,
+    TapestClientError,
     generate_checksum,
     is_same_file,
     cleanup_file,
@@ -24,3 +23,21 @@ from .client import (
     ingest_files_from_directory,
     extract_files_to_directory,
 )
+
+__all__ = [
+    "TapestClientError",
+    "generate_checksum",
+    "is_same_file",
+    "cleanup_file",
+    "ingest_file",
+    "recache_file",
+    "extract_file",
+    "extract_file_with_metadata",
+    "delete_file",
+    "retrieve_file_metadata",
+    "update_file_metadata",
+    "retrieve_metadata",
+    "retrieve_status",
+    "ingest_files_from_directory",
+    "extract_files_to_directory",
+]

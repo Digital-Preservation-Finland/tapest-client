@@ -1,10 +1,8 @@
 ---
 
 variables:
-  CI_SKIP_STATIC_ANALYSIS: "yes"
-  CI_SKIP_SYSTEM_UNIT_TESTS: "yes"
   CI_SKIP_VENV_UNIT_TESTS: "yes"
-  CI_SKIP_COVERAGE: "yes"
+  CI_COVERAGE_SYSTEM: "yes"
   CI_EL9: "yes"
 
 include:
