@@ -21,16 +21,18 @@
 # @license GNU Affero General Public License, version 3
 # @link https://www.csc.fi/
 # ----------------------------------------------------------------------
-# TapeSt API client library. Expects a configuration dictionary:
-# {
-#     "ICE_TOKEN": "<token>",                # required
-#     "ICE_HOST": "https://ice.csc.fi",      # required
-#     "STORAGE_ACCOUNT_NAME": "<name>",      # required for trusted agents
-#     "MAX_RETRY_ATTEMPTS": 10,              # optional (default: 10)
-#     "DEFAULT_SLEEP_DURATION": 120,         # optional (default: 120)
-#     "CLEANUP_ON_FAIL": True,               # optional (default: False)
-#     "VERIFY_SSL": True,                    # optional (default: True)
-# }
+# TapeSt API client library. Accepts a Config instance or any object
+# supporting attribute access for:
+#
+#     config.ice_token                # required
+#     config.ice_host                 # required
+#     config.storage_account_name     # optional
+#     config.max_retry_attempts       # optional (default: 10)
+#     config.default_sleep_duration   # optional (default: 120)
+#     config.cleanup_on_fail          # optional (default: False)
+#     config.verify_ssl               # optional (default: True)
+#
+# Dict-style access (config["key"]) is also supported via Config.
 # ----------------------------------------------------------------------
 
 from __future__ import annotations
@@ -56,9 +58,9 @@ class TapestClientError(Exception):
 
 def _build_headers(config, storage_name=None, extra=None):
     """Build common request headers from config."""
-    headers = {"Authorization": f"Bearer {config['ICE_TOKEN']}"}
-    if "STORAGE_ACCOUNT_NAME" in config:
-        headers["X-ICE-Account"] = config["STORAGE_ACCOUNT_NAME"]
+    headers = {"Authorization": f"Bearer {config.ice_token}"}
+    if config.storage_account_name:
+        headers["X-ICE-Account"] = config.storage_account_name
     if storage_name:
         headers["X-ICE-Storage"] = storage_name
     if extra:
@@ -69,15 +71,15 @@ def _build_headers(config, storage_name=None, extra=None):
 def _file_url(config, identifier):
     """Build /file endpoint URL."""
     encoded = urllib.parse.quote(identifier, safe="")
-    return f"{config['ICE_HOST']}/file?identifier={encoded}"
+    return f"{config.ice_host}/file?identifier={encoded}"
 
 
 def _metadata_url(config, identifier=None):
     """Build /metadata endpoint URL."""
     if identifier:
         encoded = urllib.parse.quote(identifier, safe="")
-        return f"{config['ICE_HOST']}/metadata?identifier={encoded}"
-    return f"{config['ICE_HOST']}/metadata"
+        return f"{config.ice_host}/metadata?identifier={encoded}"
+    return f"{config.ice_host}/metadata"
 
 
 def _request_with_retry(request_fn, config, error_msg):
@@ -86,8 +88,8 @@ def _request_with_retry(request_fn, config, error_msg):
     Returns the first non-202 response. Raises TapestClientError if max
     retry attempts are exceeded.
     """
-    max_attempts = max(1, config.get("MAX_RETRY_ATTEMPTS", 10))
-    default_duration = config.get("DEFAULT_SLEEP_DURATION", 120)
+    max_attempts = max(1, config.max_retry_attempts)
+    default_duration = config.default_sleep_duration
     for _ in range(max_attempts):
         response = request_fn()
         if response.status_code != 202:
@@ -122,8 +124,8 @@ def is_same_file(local_file_pathname, size, checksum):
 
 
 def cleanup_file(config, local_file_pathname):
-    """Remove the file if CLEANUP_ON_FAIL is enabled. Ignores missing files."""
-    if config.get("CLEANUP_ON_FAIL", False):
+    """Remove the file if cleanup_on_fail is enabled. Ignores missing files."""
+    if config.cleanup_on_fail:
         try:
             Path(local_file_pathname).unlink()
         except OSError:
@@ -156,7 +158,7 @@ def ingest_file(config, identifier, local_file_pathname, storage_name=None):
         "X-ICE-Created": created,
         "X-ICE-Modified": modified,
     })
-    verify_ssl = config.get("VERIFY_SSL", True)
+    verify_ssl = config.verify_ssl
 
     def do_request():
         with open(path, "rb") as f:
@@ -201,7 +203,7 @@ def recache_file(config, identifier, local_file_pathname, storage_name=None):
         "X-ICE-Modified": file_metadata["modified"],
         "X-ICE-Recache": "true",
     })
-    verify_ssl = config.get("VERIFY_SSL", True)
+    verify_ssl = config.verify_ssl
 
     def do_request():
         with open(path, "rb") as f:
@@ -255,9 +257,9 @@ def extract_file_with_metadata(config, file_metadata, local_file_pathname,
             next_identifier, safe=""
         )
 
-    verify_ssl = config.get("VERIFY_SSL", True)
-    max_attempts = max(1, config.get("MAX_RETRY_ATTEMPTS", 10))
-    default_duration = max(1, config.get("DEFAULT_SLEEP_DURATION", 120))
+    verify_ssl = config.verify_ssl
+    max_attempts = max(1, config.max_retry_attempts)
+    default_duration = max(1, config.default_sleep_duration)
 
     for _ in range(max_attempts):
         response = requests.get(
@@ -319,7 +321,7 @@ def delete_file(config, identifier, storage_name=None):
     """Delete a file by identifier."""
     url = _file_url(config, identifier)
     headers = _build_headers(config, storage_name)
-    verify_ssl = config.get("VERIFY_SSL", True)
+    verify_ssl = config.verify_ssl
     response = requests.delete(url, headers=headers, verify=verify_ssl)
     if response.status_code == 204:
         return None
@@ -333,7 +335,7 @@ def retrieve_file_metadata(config, identifier, storage_name=None):
     """Retrieve metadata for a single file."""
     url = _metadata_url(config, identifier)
     headers = _build_headers(config, storage_name)
-    verify_ssl = config.get("VERIFY_SSL", True)
+    verify_ssl = config.verify_ssl
     response = requests.get(url, headers=headers, verify=verify_ssl)
     if response.status_code == 200:
         return response.json()
@@ -348,7 +350,7 @@ def update_file_metadata(config, identifier, file_metadata_update,
     """Update metadata for a single file."""
     url = _metadata_url(config, identifier)
     headers = _build_headers(config, storage_name)
-    verify_ssl = config.get("VERIFY_SSL", True)
+    verify_ssl = config.verify_ssl
     response = requests.patch(
         url, json=file_metadata_update, headers=headers, verify=verify_ssl
     )
@@ -364,7 +366,7 @@ def retrieve_metadata(config, query=None, storage_name=None):
     """Retrieve metadata matching query parameters."""
     url = _metadata_url(config)
     headers = _build_headers(config, storage_name)
-    verify_ssl = config.get("VERIFY_SSL", True)
+    verify_ssl = config.verify_ssl
     response = requests.post(
         url, json=query or {}, headers=headers, verify=verify_ssl
     )
@@ -377,9 +379,9 @@ def retrieve_metadata(config, query=None, storage_name=None):
 
 def retrieve_status(config):
     """Retrieve service status."""
-    url = f"{config['ICE_HOST']}/status"
-    headers = {"Authorization": f"Bearer {config['ICE_TOKEN']}"}
-    verify_ssl = config.get("VERIFY_SSL", True)
+    url = f"{config.ice_host}/status"
+    headers = {"Authorization": f"Bearer {config.ice_token}"}
+    verify_ssl = config.verify_ssl
     response = requests.get(url, headers=headers, verify=verify_ssl)
     if response.status_code == 200:
         return response.json()

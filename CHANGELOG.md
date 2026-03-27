@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 0.0.4 - 2026-03-27
+
+### Added
+- `Config` dataclass with attribute access (`config.ice_host`) and type coercion driven by field annotations
+- `get_config()` loads from INI file and/or `TAPEST_CLIENT_*` env vars on first call, cached thereafter
+- Test plan docstrings for all test modules (TAPEST-158)
+
+### Changed
+- **Breaking:** Config is now a dataclass, not a dict. All config keys are lowercase. Client code uses attribute access (`config.ice_token`) instead of dict access (`config["ICE_TOKEN"]`).
+
 ## 0.0.3 - 2026-03-20
 
 ### Changed
