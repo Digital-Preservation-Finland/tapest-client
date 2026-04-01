@@ -52,6 +52,10 @@ TIMESTAMP_FORMAT = "%Y-%m-%dT%H:%M:%SZ"
 class TapestClientError(Exception):
     """Error raised by tapest-client operations."""
 
+    def __init__(self, message, exit_code=1):
+        super().__init__(message)
+        self.exit_code = exit_code
+
 
 # === Internal Helpers ===
 
@@ -97,7 +101,8 @@ def _request_with_retry(request_fn, config, error_msg):
         seconds = int(response.headers.get("Retry-After", default_duration))
         time.sleep(seconds)
     raise TapestClientError(
-        f"{error_msg}: max {max_attempts} attempts exceeded"
+        f"{error_msg}: file unavailable after {max_attempts} attempts",
+        exit_code=117
     )
 
 
@@ -313,7 +318,8 @@ def extract_file_with_metadata(config, file_metadata, local_file_pathname,
     cleanup_file(config, local_file_pathname)
     raise TapestClientError(
         f"Failed to extract file {identifier}: "
-        f"max {max_attempts} attempts exceeded"
+        f"file unavailable after {max_attempts} attempts",
+        exit_code=117
     )
 
 

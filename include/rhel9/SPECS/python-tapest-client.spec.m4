@@ -11,23 +11,25 @@
 Name:           python3-tapest-client
 Version:        %{file_version}
 Release:        %{file_release_number}%{file_release_tag}.%{file_build_number}.git%{file_commit_ref}%{?dist}
-Summary:        TapeSt API client library
+Summary:        TapeSt API command-line tool and client library
 License:        AGPLv3+
 URL:            https://www.digitalpreservation.fi
 Source0:        %{file_prefix}-v%{file_version}%{?file_release_tag}-%{file_build_number}-g%{file_commit_ref}.%{file_ext}
 BuildRoot:      %{_tmppath}/%{name}-%{version}-%{release}-root-%(%{__id_u} -n)
 BuildArch:      noarch
+BuildRequires:  python3-devel
 BuildRequires:  pyproject-rpm-macros
-BuildRequires:  %{py3_dist pytest}
+BuildRequires:  %{py3_dist pip}
 BuildRequires:  %{py3_dist setuptools}
 BuildRequires:  %{py3_dist setuptools-scm}
 BuildRequires:  %{py3_dist wheel}
+BuildRequires:  %{py3_dist pytest}
 
 Obsoletes:      python3-tapest-ice-api-client < %{version}
 Provides:       python3-tapest-ice-api-client = %{version}-%{release}
 
 %description
-Client library for interacting with the TapeSt API service.
+Command-line tool and client library for the TapeSt API service.
 
 %prep
 %autosetup -n %{file_prefix}-v%{file_version}%{?file_release_tag}-%{file_build_number}-g%{file_commit_ref}
@@ -47,6 +49,7 @@ export SETUPTOOLS_SCM_PRETEND_VERSION=%{file_version}
 %files -n python3-tapest-client -f %{pyproject_files}
 %license LICENSE
 %doc README.md
+%{_bindir}/tapest-client
 
 # TODO: For now changelog must be last, because it is generated automatically
 # from git log command. Appending should be fixed to happen only after %changelog macro

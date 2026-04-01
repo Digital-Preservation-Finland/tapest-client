@@ -210,7 +210,7 @@ def test_extract_with_metadata_max_attempts(tmp_path):
     dest = tmp_path / "out.dat"
     resp_202 = _mock_response(202, headers={"Retry-After": "0"})
     with mock.patch("tapest_client.client.requests.get", return_value=resp_202):
-        with pytest.raises(TapestClientError, match="attempts exceeded"):
+        with pytest.raises(TapestClientError, match="file unavailable after"):
             extract_file_with_metadata(CONFIG, SAMPLE_METADATA, str(dest))
 
 

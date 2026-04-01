@@ -187,7 +187,7 @@ def test_retry_202_then_success():
 def test_retry_max_attempts():
     """Raises after exhausting all retry attempts."""
     resp = _mock_resp(202, {"Retry-After": "0"})
-    with pytest.raises(TapestClientError, match="max 2 attempts exceeded"):
+    with pytest.raises(TapestClientError, match="file unavailable after 2 attempts"):
         _request_with_retry(lambda: resp, Config(max_retry_attempts=2), "test")
 
 

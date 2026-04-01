@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 0.0.5 - 2026-04-02
+
+### Added
+- Command-line tool (`tapest-client`) with argparse (TAPEST-151)
+  - `ingest-one` / `ingest-many` - upload files to the service
+  - `extract-one` / `extract-many` - download files from the service
+  - `delete` - delete a preserved file and its metadata
+  - `query-metadata` / `update-metadata` - query or update file metadata
+  - `status` - retrieve service status
+  - `write-config` - create default user configuration file
+- User-level config at `~/.config/tapest-client/client.conf`
+- `update-metadata` accepts JSON string, `-` for stdin, or `--stdin`
+- `TapestClientError.exit_code` attribute for distinct return codes (117 for file unavailable)
+- RPM packaging: console_scripts entry point, `%{_bindir}/tapest-client`
+- SonarQube integration
+- `sonar-project.properties`
+
+### Changed
+- `.gitlab-ci.yml`: added `tapest.yml` pipeline, `CI_SONAR`, `CI_PYTHON_3`
+- `setup.cfg`: added `console_scripts` entry point, updated description
+- RPM spec: added `python3-devel`, `pip` to BuildRequires, `%{_bindir}/tapest-client` to `%files`
+
 ## 0.0.4 - 2026-03-27
 
 ### Added
