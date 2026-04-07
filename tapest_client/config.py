@@ -40,6 +40,7 @@ Example config file (``/etc/tapest-client/client.conf``)::
     default_sleep_duration = 120
     cleanup_on_fail = false
     verify_ssl = true
+    ca_cert_path =
 
 Usage::
 
@@ -51,6 +52,7 @@ Usage::
 import configparser
 import dataclasses
 import os
+from typing import Any
 
 
 CONFIG_FILE = "/etc/tapest-client/client.conf"
@@ -59,12 +61,12 @@ CONFIG_SECTION = "tapest-client"
 _BOOL_STRINGS = {"true", "yes", "1"}
 
 
-def _parse_bool(value):
+def _parse_bool(value: str) -> bool:
     """Parse a boolean value from string."""
     return value.lower() in _BOOL_STRINGS
 
 
-def _coerce(field_type, value):
+def _coerce(field_type: type, value: Any) -> Any:
     """Coerce a string value to the field's annotated type."""
     if field_type is int:
         return int(value)
@@ -83,6 +85,7 @@ class Config:
     default_sleep_duration: int = 120
     cleanup_on_fail: bool = False
     verify_ssl: bool = True
+    ca_cert_path: str = ""
 
     def read(self, config_file: str = CONFIG_FILE,
              section: str = CONFIG_SECTION) -> None:

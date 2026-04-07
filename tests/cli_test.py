@@ -2,7 +2,6 @@
 
 import json
 from types import SimpleNamespace
-from unittest import mock
 
 import pytest
 
@@ -13,16 +12,7 @@ from tapest_client.cli import (
     _run_extract_files,
 )
 from tapest_client import TapestClientError
-from tapest_client.config import Config
 
-
-@pytest.fixture
-def config():
-    """Test config with dummy values."""
-    cfg = Config()
-    cfg.ice_token = "test-token"
-    cfg.ice_host = "https://test.example.com"
-    return cfg
 
 
 def _metadata_args(**overrides):
@@ -39,6 +29,7 @@ def _metadata_args(**overrides):
 # -- Parsing ------------------------------------------------------------------
 
 def test_no_args_shows_help(monkeypatch, capsys):
+    """No arguments prints help and exits with code 1."""
     monkeypatch.setattr("sys.argv", ["tapest-client"])
     with pytest.raises(SystemExit) as exc_info:
         main()
@@ -47,12 +38,14 @@ def test_no_args_shows_help(monkeypatch, capsys):
 
 
 def test_help_exits_0():
+    """--help exits with code 0."""
     with pytest.raises(SystemExit) as exc_info:
         build_parser().parse_args(["--help"])
     assert exc_info.value.code == 0
 
 
 def test_ingest_parses_all_options():
+    """ingest-one parses all global and subcommand options."""
     args = build_parser().parse_args([
         "-v", "--config", "/conf", "--host", "https://h",
         "ingest-one", "--storage", "tape-1", "/id", "/path"])
@@ -65,9 +58,11 @@ def test_ingest_parses_all_options():
 
 
 def test_metadata_query_params():
+    """query-metadata parses repeatable and flag options."""
     args = build_parser().parse_args([
         "query-metadata", "--prefix", "pfx1", "--prefix", "pfx2",
-        "--identifier", "id1", "--pending", "--errors", "--order", "ingested", "--limit", "10"])
+        "--identifier", "id1", "--pending", "--errors",
+        "--order", "ingested", "--limit", "10"])
     assert args.prefix == ["pfx1", "pfx2"]
     assert args.identifier == ["id1"]
     assert args.pending is True
@@ -76,6 +71,7 @@ def test_metadata_query_params():
 
 
 def test_extract_with_next_id():
+    """extract-one accepts optional next file identifier."""
     args = build_parser().parse_args(
         ["extract-one", "/id", "/path", "/next-id"])
     assert args.next_file_id == "/next-id"
@@ -83,134 +79,137 @@ def test_extract_with_next_id():
 
 # -- Handlers -----------------------------------------------------------------
 
-def test_status(config, capsys):
-    with mock.patch("tapest_client.cli.tapest_client.retrieve_status",
-                    return_value={"status": "ok"}):
-        _run_status(config, SimpleNamespace())
+def test_status(config_fx, cli_fx, capsys):
+    """status handler prints JSON service status."""
+    cli_fx("retrieve_status", return_value={"status": "ok"})
+    _run_status(config_fx(), SimpleNamespace())
     assert json.loads(capsys.readouterr().out)["status"] == "ok"
 
 
-def test_ingest_calls_library(config, capsys):
-    result = {"identifier": "/id", "size": 100}
-    args = SimpleNamespace(
-        file_id="/id", local_path="/path",
-        storage=None, )
-    with mock.patch("tapest_client.cli.tapest_client.ingest_file",
-                    return_value=result) as m:
-        _run_ingest(config, args)
-    m.assert_called_once_with(config, "/id", "/path", storage_name=None)
+def test_ingest_calls_library(config_fx, cli_fx, capsys):
+    """ingest-one passes file_id, path, and storage_name to library."""
+    cli_fx(
+        "ingest_file",
+        return_value={"identifier": "/id", "size": 100})
+    args = SimpleNamespace(file_id="/id", local_path="/path", storage=None)
+    _run_ingest(config_fx(), args)
+    assert cli_fx.calls["ingest_file"] == [
+        (("/id", "/path"), {"storage_name": None})]
     assert json.loads(capsys.readouterr().out)["identifier"] == "/id"
 
 
-
-def test_extract_calls_library(config, capsys):
+def test_extract_calls_library(config_fx, cli_fx):
+    """extract-one passes file_id, path, next_identifier, and storage_name."""
+    cli_fx("extract_file", return_value={"identifier": "/id"})
     args = SimpleNamespace(
         file_id="/id", local_path="/path",
-        next_file_id=None, storage=None, )
-    with mock.patch("tapest_client.cli.tapest_client.extract_file",
-                    return_value={"identifier": "/id"}) as m:
-        _run_extract(config, args)
-    m.assert_called_once_with(
-        config, "/id", "/path", next_identifier=None, storage_name=None)
+        next_file_id=None, storage=None)
+    _run_extract(config_fx(), args)
+    assert cli_fx.calls["extract_file"] == [
+        (("/id", "/path"), {"next_identifier": None, "storage_name": None})]
 
 
-def test_delete_calls_library(config):
-    args = SimpleNamespace(file_id="/id", storage=None, )
-    with mock.patch("tapest_client.cli.tapest_client.delete_file") as m:
-        _run_delete(config, args)
-    m.assert_called_once_with(config, "/id", storage_name=None)
-
+def test_delete_calls_library(config_fx, cli_fx):
+    """delete passes file_id and storage_name to library."""
+    cli_fx("delete_file")
+    args = SimpleNamespace(file_id="/id", storage=None)
+    _run_delete(config_fx(), args)
+    assert cli_fx.calls["delete_file"] == [(("/id",), {"storage_name": None})]
 
 
 # -- Metadata modes -----------------------------------------------------------
 
-def test_metadata_retrieve_single(config, capsys):
-    args = _metadata_args(file_id="/id")
-    with mock.patch("tapest_client.cli.tapest_client.retrieve_file_metadata",
-                    return_value={"identifier": "/id"}) as m:
-        _run_query_metadata(config, args)
-    m.assert_called_once_with(config, "/id", storage_name=None)
+def test_metadata_retrieve_single(config_fx, cli_fx, capsys):
+    """query-metadata with file_id retrieves single file metadata."""
+    cli_fx(
+        "retrieve_file_metadata",
+        return_value={"identifier": "/id"})
+    _run_query_metadata(config_fx(), _metadata_args(file_id="/id"))
+    assert cli_fx.calls["retrieve_file_metadata"] == [
+        (("/id",), {"storage_name": None})]
 
 
-def test_metadata_query_builds_correct_body(config, capsys):
-    args = _metadata_args(
+def test_metadata_query_builds_correct_body(config_fx, cli_fx, capsys):
+    """query-metadata without file_id builds correct query dict."""
+    cli_fx(
+        "retrieve_metadata",
+        return_value={"metadata": []})
+    _run_query_metadata(config_fx(), _metadata_args(
         prefix=["pfx1"], identifier=["id1"], pending=True,
-        order="ingested", limit=10)
-    with mock.patch("tapest_client.cli.tapest_client.retrieve_metadata",
-                    return_value={"metadata": []}) as m:
-        _run_query_metadata(config, args)
-    m.assert_called_once_with(config, query={
-        "prefixes": ["pfx1"], "identifiers": ["id1"],
-        "pending_only": True, "order_by": "ingested", "limit": 10,
-    }, storage_name=None)
+        order="ingested", limit=10))
+    assert cli_fx.calls["retrieve_metadata"] == [((), {
+        "query": {
+            "prefixes": ["pfx1"], "identifiers": ["id1"],
+            "pending_only": True, "order_by": "ingested", "limit": 10,
+        },
+        "storage_name": None,
+    })]
 
 
-
-def test_update_metadata(config, capsys):
+def test_update_metadata(config_fx, cli_fx, capsys):
+    """update-metadata parses JSON input and passes it to library."""
+    cli_fx(
+        "update_file_metadata",
+        return_value={"identifier": "/id"})
     args = SimpleNamespace(
         file_id="/id",
         json_input='{"stored": "2030-01-01T00:00:00Z"}',
         storage=None, stdin=False, json_file=None)
-    with mock.patch("tapest_client.cli.tapest_client.update_file_metadata",
-                    return_value={"identifier": "/id"}) as m:
-        _run_update_metadata(config, args)
-    m.assert_called_once_with(
-        config, "/id", {"stored": "2030-01-01T00:00:00Z"}, storage_name=None)
-
+    _run_update_metadata(config_fx(), args)
+    assert cli_fx.calls["update_file_metadata"] == [
+        (("/id", {"stored": "2030-01-01T00:00:00Z"}),
+         {"storage_name": None})]
 
 
 # -- Batch operations ---------------------------------------------------------
 
-def test_ingest_directory(config, capsys):
+def test_ingest_directory(config_fx, cli_fx, capsys):
+    """ingest-many prints JSON list of ingested files."""
     results = [{"identifier": "/a"}, {"identifier": "/b"}]
-    args = SimpleNamespace(
-        local_dir="/dir", skip=False, force=False, )
-    with mock.patch("tapest_client.cli.tapest_client"
-                    ".ingest_files_from_directory",
-                    return_value=results) as m:
-        _run_ingest_directory(config, args)
-    m.assert_called_once_with(config, "/dir", skip=False, force=False)
+    cli_fx("ingest_files_from_directory", return_value=results)
+    args = SimpleNamespace(local_dir="/dir", skip=False, force=False)
+    _run_ingest_directory(config_fx(), args)
     assert len(json.loads(capsys.readouterr().out)) == 2
 
 
-def test_extract_files(config, capsys):
+def test_extract_files(config_fx, cli_fx, capsys):
+    """extract-many queries metadata then extracts matching files."""
     metadata = {"metadata": [{"identifier": "/a"}, {"identifier": "/b"}]}
+    cli_fx("retrieve_metadata", return_value=metadata)
+    cli_fx(
+        "extract_files_to_directory",
+        return_value=[{"identifier": "/a"}])
     args = SimpleNamespace(
         local_dir="/dir", prefix=["pfx"],
-        identifier=None, skip=False, force=False,
-        storage=None, )
-    with mock.patch("tapest_client.cli.tapest_client.retrieve_metadata",
-                    return_value=metadata), \
-         mock.patch("tapest_client.cli.tapest_client"
-                    ".extract_files_to_directory",
-                    return_value=[{"identifier": "/a"}]) as m:
-        _run_extract_files(config, args)
-    m.assert_called_once()
+        identifier=None, skip=False, force=False, storage=None)
+    _run_extract_files(config_fx(), args)
 
 
-def test_extract_files_requires_source(config):
+def test_extract_files_requires_source(config_fx):
+    """extract-many exits if neither --prefix nor --identifier is given."""
     args = SimpleNamespace(
         local_dir="/dir", prefix=None,
-        identifier=None, skip=False, force=False,
-        storage=None, )
+        identifier=None, skip=False, force=False, storage=None)
     with pytest.raises(SystemExit):
-        _run_extract_files(config, args)
+        _run_extract_files(config_fx(), args)
 
 
 # -- Error handling & config --------------------------------------------------
 
 def test_tapest_error_exits_1(monkeypatch):
+    """TapestClientError during execution exits with code 1."""
     monkeypatch.setattr("sys.argv", ["tapest-client", "status"])
-    with mock.patch("tapest_client.cli._load_config"), \
-         mock.patch("tapest_client.cli.tapest_client.retrieve_status",
-                    side_effect=TapestClientError("fail")):
-        with pytest.raises(SystemExit) as exc_info:
-            main()
-        assert exc_info.value.code == 1
-
+    monkeypatch.setattr("tapest_client.cli._load_config", lambda args: None)
+    monkeypatch.setattr(
+        "tapest_client.cli.tapest_client.retrieve_status",
+        lambda cfg: (_ for _ in ()).throw(TapestClientError("fail")))
+    with pytest.raises(SystemExit) as exc_info:
+        main()
+    assert exc_info.value.code == 1
 
 
 def test_write_config_creates_file(tmp_path, monkeypatch, capsys):
+    """write-config creates config file in user config directory."""
     conf_path = tmp_path / "tapest-client" / "client.conf"
     monkeypatch.setattr("tapest_client.cli.USER_CONFIG_FILE", str(conf_path))
     _run_write_config(None, SimpleNamespace())
@@ -220,6 +219,7 @@ def test_write_config_creates_file(tmp_path, monkeypatch, capsys):
 
 
 def test_write_config_exits_if_exists(tmp_path, monkeypatch, capsys):
+    """write-config refuses to overwrite existing config file."""
     conf_path = tmp_path / "tapest-client" / "client.conf"
     conf_path.parent.mkdir(parents=True)
     conf_path.write_text("existing")
@@ -231,7 +231,9 @@ def test_write_config_exits_if_exists(tmp_path, monkeypatch, capsys):
 
 
 def test_load_config_host_override(tmp_path):
+    """--host CLI flag overrides ice_host from config file."""
     conf = tmp_path / "client.conf"
     conf.write_text("[tapest-client]\nice_host = https://h\nice_token = tok\n")
-    args = SimpleNamespace(config=str(conf), host="https://override")
+    args = SimpleNamespace(
+        config=str(conf), host="https://override", ca_cert=None)
     assert _load_config(args).ice_host == "https://override"

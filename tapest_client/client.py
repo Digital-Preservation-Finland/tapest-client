@@ -31,6 +31,7 @@
 #     config.default_sleep_duration   # optional (default: 120)
 #     config.cleanup_on_fail          # optional (default: False)
 #     config.verify_ssl               # optional (default: True)
+#     config.ca_cert_path             # optional (default: "")
 #
 # Dict-style access (config["key"]) is also supported via Config.
 # ----------------------------------------------------------------------
@@ -44,7 +45,11 @@ import urllib.parse
 from datetime import datetime, timezone
 from pathlib import Path
 
+from collections.abc import Callable
+
 import requests
+
+from tapest_client.config import Config
 
 TIMESTAMP_FORMAT = "%Y-%m-%dT%H:%M:%SZ"
 
@@ -52,7 +57,7 @@ TIMESTAMP_FORMAT = "%Y-%m-%dT%H:%M:%SZ"
 class TapestClientError(Exception):
     """Error raised by tapest-client operations."""
 
-    def __init__(self, message, exit_code=1):
+    def __init__(self, message: str, exit_code: int = 1) -> None:
         super().__init__(message)
         self.exit_code = exit_code
 
@@ -60,7 +65,8 @@ class TapestClientError(Exception):
 # === Internal Helpers ===
 
 
-def _build_headers(config, storage_name=None, extra=None):
+def _build_headers(config: Config, storage_name: str | None = None,
+                   extra: dict[str, str] | None = None) -> dict[str, str]:
     """Build common request headers from config."""
     headers = {"Authorization": f"Bearer {config.ice_token}"}
     if config.storage_account_name:
@@ -72,13 +78,13 @@ def _build_headers(config, storage_name=None, extra=None):
     return headers
 
 
-def _file_url(config, identifier):
+def _file_url(config: Config, identifier: str) -> str:
     """Build /file endpoint URL."""
     encoded = urllib.parse.quote(identifier, safe="")
     return f"{config.ice_host}/file?identifier={encoded}"
 
 
-def _metadata_url(config, identifier=None):
+def _metadata_url(config: Config, identifier: str | None = None) -> str:
     """Build /metadata endpoint URL."""
     if identifier:
         encoded = urllib.parse.quote(identifier, safe="")
@@ -86,7 +92,15 @@ def _metadata_url(config, identifier=None):
     return f"{config.ice_host}/metadata"
 
 
-def _request_with_retry(request_fn, config, error_msg):
+def _verify_param(config: Config) -> str | bool:
+    """Return the ``verify`` value for requests calls."""
+    if config.verify_ssl and config.ca_cert_path:
+        return config.ca_cert_path
+    return config.verify_ssl
+
+
+def _request_with_retry(request_fn: Callable[[], requests.Response],
+                        config: Config, error_msg: str) -> requests.Response:
     """Execute request_fn in a retry loop, handling 202 Retry-After responses.
 
     Returns the first non-202 response. Raises TapestClientError if max
@@ -109,7 +123,7 @@ def _request_with_retry(request_fn, config, error_msg):
 # === Utility Functions ===
 
 
-def generate_checksum(local_file_pathname):
+def generate_checksum(local_file_pathname: str | Path) -> str:
     """Compute SHA-256 checksum for a file, returned as 'sha256:<hex>'."""
     sha256_hash = hashlib.sha256()
     with open(local_file_pathname, "rb") as f:
@@ -118,7 +132,8 @@ def generate_checksum(local_file_pathname):
     return f"sha256:{sha256_hash.hexdigest()}"
 
 
-def is_same_file(local_file_pathname, size, checksum):
+def is_same_file(local_file_pathname: str | Path, size: int,
+                 checksum: str) -> bool:
     """Check if file matches expected size and checksum."""
     try:
         if Path(local_file_pathname).stat().st_size != size:
@@ -128,7 +143,7 @@ def is_same_file(local_file_pathname, size, checksum):
         return False
 
 
-def cleanup_file(config, local_file_pathname):
+def cleanup_file(config: Config, local_file_pathname: str) -> None:
     """Remove the file if cleanup_on_fail is enabled. Ignores missing files."""
     if config.cleanup_on_fail:
         try:
@@ -140,7 +155,8 @@ def cleanup_file(config, local_file_pathname):
 # === Core Operation Functions ===
 
 
-def ingest_file(config, identifier, local_file_pathname, storage_name=None):
+def ingest_file(config: Config, identifier: str, local_file_pathname: str,
+                storage_name: str | None = None) -> dict:
     """Ingest a local file and return its metadata.
 
     A single stat() call is used to collect size, creation time and
@@ -163,7 +179,7 @@ def ingest_file(config, identifier, local_file_pathname, storage_name=None):
         "X-ICE-Created": created,
         "X-ICE-Modified": modified,
     })
-    verify_ssl = config.verify_ssl
+    verify_ssl = _verify_param(config)
 
     def do_request():
         with open(path, "rb") as f:
@@ -182,7 +198,8 @@ def ingest_file(config, identifier, local_file_pathname, storage_name=None):
     )
 
 
-def recache_file(config, identifier, local_file_pathname, storage_name=None):
+def recache_file(config: Config, identifier: str, local_file_pathname: str,
+                 storage_name: str | None = None) -> dict:
     """Re-upload a cached file, verifying it matches."""
     path = Path(local_file_pathname)
     file_metadata = retrieve_file_metadata(config, identifier)
@@ -208,7 +225,7 @@ def recache_file(config, identifier, local_file_pathname, storage_name=None):
         "X-ICE-Modified": file_metadata["modified"],
         "X-ICE-Recache": "true",
     })
-    verify_ssl = config.verify_ssl
+    verify_ssl = _verify_param(config)
 
     def do_request():
         with open(path, "rb") as f:
@@ -227,8 +244,9 @@ def recache_file(config, identifier, local_file_pathname, storage_name=None):
     )
 
 
-def extract_file(config, identifier, local_file_pathname,
-                 next_identifier=None, storage_name=None):
+def extract_file(config: Config, identifier: str, local_file_pathname: str,
+                 next_identifier: str | None = None,
+                 storage_name: str | None = None) -> dict:
     """Extract a file by identifier to a local path."""
     file_metadata = retrieve_file_metadata(
         config, identifier, storage_name
@@ -239,8 +257,10 @@ def extract_file(config, identifier, local_file_pathname,
     )
 
 
-def extract_file_with_metadata(config, file_metadata, local_file_pathname,
-                               next_identifier=None, storage_name=None):
+def extract_file_with_metadata(config: Config, file_metadata: dict,
+                               local_file_pathname: str,
+                               next_identifier: str | None = None,
+                               storage_name: str | None = None) -> dict:
     """Extract a file using provided metadata to a local path.
 
     Uses its own retry loop because the response body must be written to
@@ -262,7 +282,7 @@ def extract_file_with_metadata(config, file_metadata, local_file_pathname,
             next_identifier, safe=""
         )
 
-    verify_ssl = config.verify_ssl
+    verify_ssl = _verify_param(config)
     max_attempts = max(1, config.max_retry_attempts)
     default_duration = max(1, config.default_sleep_duration)
 
@@ -323,11 +343,12 @@ def extract_file_with_metadata(config, file_metadata, local_file_pathname,
     )
 
 
-def delete_file(config, identifier, storage_name=None):
+def delete_file(config: Config, identifier: str,
+                storage_name: str | None = None) -> None:
     """Delete a file by identifier."""
     url = _file_url(config, identifier)
     headers = _build_headers(config, storage_name)
-    verify_ssl = config.verify_ssl
+    verify_ssl = _verify_param(config)
     response = requests.delete(url, headers=headers, verify=verify_ssl)
     if response.status_code == 204:
         return None
@@ -337,11 +358,12 @@ def delete_file(config, identifier, storage_name=None):
     )
 
 
-def retrieve_file_metadata(config, identifier, storage_name=None):
+def retrieve_file_metadata(config: Config, identifier: str,
+                           storage_name: str | None = None) -> dict:
     """Retrieve metadata for a single file."""
     url = _metadata_url(config, identifier)
     headers = _build_headers(config, storage_name)
-    verify_ssl = config.verify_ssl
+    verify_ssl = _verify_param(config)
     response = requests.get(url, headers=headers, verify=verify_ssl)
     if response.status_code == 200:
         return response.json()
@@ -351,12 +373,13 @@ def retrieve_file_metadata(config, identifier, storage_name=None):
     )
 
 
-def update_file_metadata(config, identifier, file_metadata_update,
-                         storage_name=None):
+def update_file_metadata(config: Config, identifier: str,
+                         file_metadata_update: dict,
+                         storage_name: str | None = None) -> dict:
     """Update metadata for a single file."""
     url = _metadata_url(config, identifier)
     headers = _build_headers(config, storage_name)
-    verify_ssl = config.verify_ssl
+    verify_ssl = _verify_param(config)
     response = requests.patch(
         url, json=file_metadata_update, headers=headers, verify=verify_ssl
     )
@@ -368,11 +391,12 @@ def update_file_metadata(config, identifier, file_metadata_update,
     )
 
 
-def retrieve_metadata(config, query=None, storage_name=None):
+def retrieve_metadata(config: Config, query: dict | None = None,
+                      storage_name: str | None = None) -> dict:
     """Retrieve metadata matching query parameters."""
     url = _metadata_url(config)
     headers = _build_headers(config, storage_name)
-    verify_ssl = config.verify_ssl
+    verify_ssl = _verify_param(config)
     response = requests.post(
         url, json=query or {}, headers=headers, verify=verify_ssl
     )
@@ -383,11 +407,11 @@ def retrieve_metadata(config, query=None, storage_name=None):
     )
 
 
-def retrieve_status(config):
+def retrieve_status(config: Config) -> dict:
     """Retrieve service status."""
     url = f"{config.ice_host}/status"
     headers = {"Authorization": f"Bearer {config.ice_token}"}
-    verify_ssl = config.verify_ssl
+    verify_ssl = _verify_param(config)
     response = requests.get(url, headers=headers, verify=verify_ssl)
     if response.status_code == 200:
         return response.json()
@@ -399,8 +423,9 @@ def retrieve_status(config):
 # === Batch Operation Functions ===
 
 
-def ingest_files_from_directory(config, local_directory_pathname,
-                                skip=False, force=False):
+def ingest_files_from_directory(config: Config, local_directory_pathname: str,
+                                skip: bool = False,
+                                force: bool = False) -> list[dict]:
     """Ingest all files from a directory tree.
 
     Identifiers are derived from relative paths, prefixed with the
@@ -447,8 +472,10 @@ def ingest_files_from_directory(config, local_directory_pathname,
     return ingested
 
 
-def extract_files_to_directory(config, metadata, local_directory_pathname,
-                               skip=False, force=False, storage_name=None):
+def extract_files_to_directory(config: Config, metadata: list[dict],
+                               local_directory_pathname: str,
+                               skip: bool = False, force: bool = False,
+                               storage_name: str | None = None) -> list[dict]:
     """Extract files described in metadata list to a directory tree."""
     root = Path(local_directory_pathname)
     if not root.is_dir():

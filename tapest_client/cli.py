@@ -40,6 +40,8 @@ Commands::
     write-config       Write default configuration file
 """
 
+from __future__ import annotations
+
 import argparse
 import json
 import logging
@@ -79,6 +81,12 @@ cleanup_on_fail = false
 ; Whether to verify the SSL certificate of the host.
 ; Do *not* change this except for testing purposes.
 verify_ssl = true
+
+; Path to a CA certificate bundle (PEM) used for SSL verification.
+; When set, this overrides the default certifi bundle so that
+; requests trusts the certificates in the given file.
+; Leave empty to use the default (certifi / system) trust store.
+ca_cert_path =
 """
 
 METADATA_ORDER_CHOICES = [
@@ -89,7 +97,7 @@ METADATA_ORDER_CHOICES = [
 
 # -- Parser construction -----------------------------------------------------
 
-def build_parser():
+def build_parser() -> argparse.ArgumentParser:
     """Build the argument parser with all subcommands."""
     parser = argparse.ArgumentParser(
         prog="tapest-client",
@@ -112,6 +120,9 @@ def build_parser():
     parser.add_argument(
         "--host", default=None,
         help="API host URL")
+    parser.add_argument(
+        "--ca-cert", default=None, metavar="PATH",
+        help="CA certificate bundle (PEM) for SSL verification")
 
     subparsers = parser.add_subparsers(dest="command", metavar="COMMAND")
 
@@ -227,7 +238,7 @@ def build_parser():
 
 # -- Utilities ---------------------------------------------------------------
 
-def _setup_logging(args):
+def _setup_logging(args: argparse.Namespace) -> None:
     """Configure logging based on verbosity flags."""
     handler = logging.StreamHandler(sys.stderr)
     handler.setFormatter(logging.Formatter("%(message)s"))
@@ -244,7 +255,7 @@ def _setup_logging(args):
 USER_CONFIG_FILE = os.path.expanduser("~/.config/tapest-client/client.conf")
 
 
-def _resolve_config_file(args_config):
+def _resolve_config_file(args_config: str | None) -> str:
     """Find the config file: explicit -c, then system, then user home."""
     if args_config:
         return args_config
@@ -255,13 +266,15 @@ def _resolve_config_file(args_config):
     return CONFIG_FILE
 
 
-def _load_config(args):
+def _load_config(args: argparse.Namespace) -> Config:
     """Create and load configuration, applying CLI overrides."""
     config = Config()
     config_file = _resolve_config_file(args.config)
     config.read(config_file=config_file)
     if args.host:
         config.ice_host = args.host
+    if args.ca_cert:
+        config.ca_cert_path = args.ca_cert
     if not config.ice_host:
         raise TapestClientError(
             "No API host configured. Set ice_host in "
@@ -275,14 +288,15 @@ def _load_config(args):
     return config
 
 
-def _print_json(data):
+def _print_json(data: object) -> None:
     """Print data as formatted JSON to stdout."""
     print(json.dumps(data, indent=2))
 
 
 # -- Subcommand handlers -----------------------------------------------------
 
-def _run_write_config(_config, args):
+def _run_write_config(_config: Config | None,
+                      args: argparse.Namespace) -> None:
     """Write a default configuration file to the user config directory."""
     path = Path(USER_CONFIG_FILE)
     if path.is_file():
@@ -294,7 +308,7 @@ def _run_write_config(_config, args):
     print(f"Edit it with your credentials:  vi {path}")
 
 
-def _run_status(config, args):
+def _run_status(config: Config, args: argparse.Namespace) -> None:
     """Retrieve service status."""
     logger.info("Retrieving service status ...")
     result = tapest_client.retrieve_status(config)
@@ -302,7 +316,7 @@ def _run_status(config, args):
     logger.info("Service status retrieved successfully")
 
 
-def _run_ingest(config, args):
+def _run_ingest(config: Config, args: argparse.Namespace) -> None:
     """Ingest a single file."""
     logger.info("Ingesting file at local pathname '%s' with identifier "
                 "'%s' ...", args.local_path, args.file_id)
@@ -314,7 +328,7 @@ def _run_ingest(config, args):
                 "local pathname '%s'", args.file_id, args.local_path)
 
 
-def _run_extract(config, args):
+def _run_extract(config: Config, args: argparse.Namespace) -> None:
     """Extract a single file."""
     logger.info("Extracting file with identifier '%s' to local pathname "
                 "'%s' ...", args.file_id, args.local_path)
@@ -327,7 +341,7 @@ def _run_extract(config, args):
                 "local pathname '%s'", args.file_id, args.local_path)
 
 
-def _run_delete(config, args):
+def _run_delete(config: Config, args: argparse.Namespace) -> None:
     """Delete a file."""
     logger.info("Deleting file with identifier '%s' ...", args.file_id)
     tapest_client.delete_file(
@@ -336,7 +350,7 @@ def _run_delete(config, args):
                 args.file_id)
 
 
-def _build_query(args):
+def _build_query(args: argparse.Namespace) -> dict:
     """Build a metadata query dict from CLI arguments."""
     query = {}
     if getattr(args, 'prefix', None):
@@ -354,7 +368,8 @@ def _build_query(args):
     return query
 
 
-def _run_query_metadata(config, args):
+def _run_query_metadata(config: Config,
+                        args: argparse.Namespace) -> None:
     """Query file metadata for a single file or by filter."""
     if args.file_id:
         logger.info("Retrieving metadata for file with identifier "
@@ -370,7 +385,8 @@ def _run_query_metadata(config, args):
     _print_json(result)
 
 
-def _run_update_metadata(config, args):
+def _run_update_metadata(config: Config,
+                         args: argparse.Namespace) -> None:
     """Update file metadata."""
     if args.json_input is None and not args.stdin and not args.json_file:
         logger.error("Provide JSON string, -f FILE, - or --stdin")
@@ -398,7 +414,8 @@ def _run_update_metadata(config, args):
                 "identifier '%s'", args.file_id)
 
 
-def _run_ingest_directory(config, args):
+def _run_ingest_directory(config: Config,
+                          args: argparse.Namespace) -> None:
     """Ingest all files from a directory."""
     logger.info("Ingesting files from directory '%s' ...", args.local_dir)
     results = tapest_client.ingest_files_from_directory(
@@ -408,7 +425,8 @@ def _run_ingest_directory(config, args):
                 len(results), args.local_dir)
 
 
-def _run_extract_files(config, args):
+def _run_extract_files(config: Config,
+                       args: argparse.Namespace) -> None:
     """Extract files to a directory."""
     if not any([args.prefix, args.identifier]):
         logger.error("extract-many requires at least one of -p or -i")
@@ -437,7 +455,7 @@ def _run_extract_files(config, args):
 
 # -- Entry point -------------------------------------------------------------
 
-def main():
+def main() -> None:
     """Main CLI entry point."""
     parser = build_parser()
     args = parser.parse_args()
