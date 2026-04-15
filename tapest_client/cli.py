@@ -49,6 +49,7 @@ import os
 from pathlib import Path
 import sys
 
+import requests
 import tapest_client
 from tapest_client import TapestClientError
 from tapest_client.config import CONFIG_FILE, Config
@@ -470,6 +471,9 @@ def main() -> None:
         else:
             config = None
         args.func(config, args)
+    except requests.ConnectionError as exc:
+        logger.error("Connection failed: %s", exc)
+        sys.exit(1)
     except TapestClientError as exc:
         logger.error("Error: %s", exc)
         sys.exit(getattr(exc, 'exit_code', 1))
