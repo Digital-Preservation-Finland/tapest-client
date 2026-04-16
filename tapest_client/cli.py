@@ -109,6 +109,9 @@ def build_parser() -> argparse.ArgumentParser:
         "ingest-many", help="Ingest (upload) all files from a directory")
     sub.add_argument("local_dir", metavar="LOCAL_DIR")
     sub.add_argument(
+        "--prefix", default=None,
+        help="identifier prefix (default: directory basename)")
+    sub.add_argument(
         "--skip", action="store_true",
         help="skip files that already exist and match")
     sub.add_argument(
@@ -389,7 +392,8 @@ def _run_ingest_directory(config: Config,
     """Ingest all files from a directory."""
     logger.info("Ingesting files from directory '%s' ...", args.local_dir)
     results = tapest_client.ingest_files_from_directory(
-        config, args.local_dir, skip=args.skip, force=args.force)
+        config, args.local_dir, skip=args.skip, force=args.force,
+        prefix=args.prefix)
     _print_json(results)
     logger.info("Successfully ingested %d file(s) from '%s'",
                 len(results), args.local_dir)

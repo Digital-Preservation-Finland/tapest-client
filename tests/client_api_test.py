@@ -346,6 +346,62 @@ def test_ingest_directory_skips_subdirectories(
     assert len(result) == 1
 
 
+def test_ingest_directory_default_prefix(tmp_path, config_fx, requests_fx):
+    """Default prefix is /<directory-basename>."""
+    root = tmp_path / "mydata"
+    root.mkdir()
+    (root / "file.dat").write_bytes(b"data")
+    meta = {**SAMPLE_METADATA, "identifier": "/mydata/file.dat"}
+    requests_fx.responses["get"] = TapestClientError("404")
+    requests_fx.responses["put"] = mock_response(201, json_data=meta)
+    result = ingest_files_from_directory(config_fx(), str(root))
+    assert result[0]["identifier"] == "/mydata/file.dat"
+
+
+def test_ingest_directory_custom_prefix(tmp_path, config_fx, requests_fx):
+    """Custom prefix replaces the default directory basename."""
+    root = tmp_path / "mydata"
+    root.mkdir()
+    (root / "file.dat").write_bytes(b"data")
+    meta = {**SAMPLE_METADATA, "identifier": "/kuvi/2024/file.dat"}
+    requests_fx.responses["get"] = TapestClientError("404")
+    requests_fx.responses["put"] = mock_response(201, json_data=meta)
+    result = ingest_files_from_directory(
+        config_fx(), str(root), prefix="kuvi/2024")
+    assert result[0]["identifier"] == "/kuvi/2024/file.dat"
+
+
+def test_ingest_directory_custom_prefix_nested(
+        tmp_path, config_fx, requests_fx):
+    """Custom prefix works with nested directory structure."""
+    root = tmp_path / "mydata"
+    sub = root / "sub"
+    sub.mkdir(parents=True)
+    (sub / "file.dat").write_bytes(b"data")
+    meta = {**SAMPLE_METADATA, "identifier": "/archive/sub/file.dat"}
+    requests_fx.responses["get"] = TapestClientError("404")
+    requests_fx.responses["put"] = mock_response(201, json_data=meta)
+    result = ingest_files_from_directory(
+        config_fx(), str(root), prefix="archive")
+    assert result[0]["identifier"] == "/archive/sub/file.dat"
+
+
+@pytest.mark.parametrize("prefix", [
+    "kuvi/2024", "/kuvi/2024", "kuvi/2024/", "/kuvi/2024/", "//kuvi/2024//"])
+def test_ingest_directory_prefix_normalization(
+        tmp_path, config_fx, requests_fx, prefix):
+    """Prefix is normalized to a single leading '/' with no trailing '/'."""
+    root = tmp_path / "mydata"
+    root.mkdir()
+    (root / "file.dat").write_bytes(b"data")
+    meta = {**SAMPLE_METADATA, "identifier": "/kuvi/2024/file.dat"}
+    requests_fx.responses["get"] = TapestClientError("404")
+    requests_fx.responses["put"] = mock_response(201, json_data=meta)
+    result = ingest_files_from_directory(
+        config_fx(), str(root), prefix=prefix)
+    assert result[0]["identifier"] == "/kuvi/2024/file.dat"
+
+
 # === extract_files_to_directory ===
 
 

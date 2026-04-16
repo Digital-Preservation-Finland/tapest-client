@@ -43,6 +43,7 @@ import os
 import time
 import urllib.parse
 from datetime import datetime, timezone
+from enum import Enum
 from pathlib import Path
 
 from collections.abc import Callable
@@ -425,14 +426,20 @@ def retrieve_status(config: Config) -> dict:
 
 def ingest_files_from_directory(config: Config, local_directory_pathname: str,
                                 skip: bool = False,
-                                force: bool = False) -> list[dict]:
+                                force: bool = False,
+                                prefix: str | None = None) -> list[dict]:
     """Ingest all files from a directory tree.
 
-    Identifiers are derived from relative paths, prefixed with the
-    directory basename:
+    Identifiers are derived from relative paths within the directory.
+    By default, the directory basename is used as prefix:
         directory:  /path/to/200182
         file:       /path/to/200182/sub/file.dat
         identifier: /200182/sub/file.dat
+
+    When ``prefix`` is given, it replaces the directory basename. The
+    prefix is normalized to a single leading ``/`` with no trailing ``/``:
+        prefix:     kuvi/2024
+        identifier: /kuvi/2024/sub/file.dat
     """
     root = Path(local_directory_pathname).resolve()
     if not root.is_dir():
@@ -440,36 +447,66 @@ def ingest_files_from_directory(config: Config, local_directory_pathname: str,
             f"Directory does not exist: {local_directory_pathname}"
         )
 
+    if prefix is None:
+        prefix = "/" + root.name
+    else:
+        prefix = "/" + prefix.strip("/")
+
     ingested = []
     for path in sorted(root.rglob("*")):
         if not path.is_file():
             continue
-        identifier = "/" + root.name + "/" + path.relative_to(root).as_posix()
+        identifier = prefix + "/" + path.relative_to(root).as_posix()
 
-        try:
-            file_metadata = retrieve_file_metadata(config, identifier)
-        except TapestClientError as e:
-            if "404" not in str(e):
-                raise
+        existing = _find_file_metadata(config, identifier)
+        if existing is None:
             ingested.append(ingest_file(config, identifier, str(path)))
             continue
-
-        if skip or force:
-            same = is_same_file(
-                str(path), file_metadata["size"], file_metadata["checksum"]
+        if not (skip or force):
+            # Raise before hashing; is_same_file reads the whole file.
+            raise TapestClientError(
+                f"File already exists with identifier {identifier}"
             )
-            if skip and same:
-                continue
-            if force and not same:
-                delete_file(config, identifier)
-                ingested.append(ingest_file(config, identifier, str(path)))
-                continue
-
+        same = is_same_file(
+            str(path), existing["size"], existing["checksum"]
+        )
+        action = _conflict_action(skip, force, same)
+        if action is _ConflictAction.SKIP:
+            continue
+        if action is _ConflictAction.REPLACE:
+            delete_file(config, identifier)
+            ingested.append(ingest_file(config, identifier, str(path)))
+            continue
         raise TapestClientError(
             f"File already exists with identifier {identifier}"
         )
 
     return ingested
+
+
+def _find_file_metadata(config: Config, identifier: str) -> dict | None:
+    """Return file metadata, or None if the file does not exist."""
+    try:
+        return retrieve_file_metadata(config, identifier)
+    except TapestClientError as e:
+        if "404" not in str(e):
+            raise
+        return None
+
+
+class _ConflictAction(Enum):
+    SKIP = "skip"
+    REPLACE = "replace"
+    ERROR = "error"
+
+
+def _conflict_action(skip: bool, force: bool, same: bool) -> _ConflictAction:
+    """Resolve an existing-file conflict."""
+    if skip and same:
+        return _ConflictAction.SKIP
+    if force and not same:
+        return _ConflictAction.REPLACE
+    return _ConflictAction.ERROR
 
 
 def extract_files_to_directory(config: Config, metadata: list[dict],
@@ -491,26 +528,26 @@ def extract_files_to_directory(config: Config, metadata: list[dict],
         )
         path = root / identifier.lstrip("/")
 
-        if path.exists():
-            if skip or force:
-                same = is_same_file(
-                    str(path), file_metadata["size"], file_metadata["checksum"]
-                )
-                if skip and same:
-                    continue
-                if force and not same:
-                    path.unlink()
-                else:
-                    raise TapestClientError(
-                        f"File already exists at {path}"
-                    )
-            else:
-                raise TapestClientError(f"File already exists at {path}")
-
-        extracted.append(
-            extract_file_with_metadata(
+        if not path.exists():
+            extracted.append(extract_file_with_metadata(
                 config, file_metadata, str(path), next_id, storage_name
-            )
+            ))
+            continue
+        if not (skip or force):
+            # Raise before hashing; is_same_file reads the whole file.
+            raise TapestClientError(f"File already exists at {path}")
+        same = is_same_file(
+            str(path), file_metadata["size"], file_metadata["checksum"]
         )
+        action = _conflict_action(skip, force, same)
+        if action is _ConflictAction.SKIP:
+            continue
+        if action is _ConflictAction.REPLACE:
+            path.unlink()
+            extracted.append(extract_file_with_metadata(
+                config, file_metadata, str(path), next_id, storage_name
+            ))
+            continue
+        raise TapestClientError(f"File already exists at {path}")
 
     return extracted

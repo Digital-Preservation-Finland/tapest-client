@@ -167,7 +167,8 @@ def test_ingest_directory(config_fx, cli_fx, capsys):
     """ingest-many prints JSON list of ingested files."""
     results = [{"identifier": "/a"}, {"identifier": "/b"}]
     cli_fx("ingest_files_from_directory", return_value=results)
-    args = SimpleNamespace(local_dir="/dir", skip=False, force=False)
+    args = SimpleNamespace(local_dir="/dir", skip=False, force=False,
+                           prefix=None)
     _run_ingest_directory(config_fx(), args)
     assert len(json.loads(capsys.readouterr().out)) == 2
 
