@@ -25,6 +25,8 @@ BuildRequires:  %{py3_dist setuptools-scm}
 BuildRequires:  %{py3_dist wheel}
 BuildRequires:  %{py3_dist pytest}
 
+Requires:       python3-certifi
+
 Obsoletes:      python3-tapest-ice-api-client < %{version}
 Provides:       python3-tapest-ice-api-client = %{version}-%{release}
 
