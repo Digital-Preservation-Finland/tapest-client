@@ -43,6 +43,7 @@ Commands::
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import json
 import logging
 import os
@@ -56,39 +57,7 @@ from tapest_client.config import CONFIG_FILE, Config
 
 logger = logging.getLogger("tapest-client")
 
-DEFAULT_CONFIG = """\
-[tapest-client]
-; API token for authentication.
-; REPLACE THIS with your own token.
-ice_token =
-
-; TapeSt API host URL.
-; REPLACE THIS with the correct address.
-ice_host =
-
-; Account name used for storage operations.
-; Only needed for agent accounts. Leave empty for storage client accounts.
-storage_account_name =
-
-; Maximum number of retry attempts for API calls.
-max_retry_attempts = 10
-
-; Sleep duration (seconds) between retries.
-default_sleep_duration = 120
-
-; Remove local files on failed operations.
-cleanup_on_fail = false
-
-; Whether to verify the SSL certificate of the host.
-; Do *not* change this except for testing purposes.
-verify_ssl = true
-
-; Path to a CA certificate bundle (PEM) used for SSL verification.
-; When set, this overrides the default certifi bundle so that
-; requests trusts the certificates in the given file.
-; Leave empty to use the default (certifi / system) trust store.
-ca_cert_path =
-"""
+DEFAULT_CONFIG = json.dumps(dataclasses.asdict(Config()), indent=2) + "\n"
 
 METADATA_ORDER_CHOICES = [
     "identifier", "storage", "ingested", "stored",
@@ -273,19 +242,19 @@ def _load_config(args: argparse.Namespace) -> Config:
     config_file = _resolve_config_file(args.config)
     config.read(config_file=config_file)
     if args.host:
-        config.ice_host = args.host
+        config.host = args.host
     if args.ca_cert:
         config.ca_cert_path = args.ca_cert
-    if not config.ice_host:
+    if not config.host:
         raise TapestClientError(
-            "No API host configured. Set ice_host in "
+            "No API host configured. Set host in "
             f"{config_file} or {USER_CONFIG_FILE}")
-    if not config.ice_token:
+    if not config.token:
         raise TapestClientError(
-            "No API token configured. Set ice_token in "
-            f"{config_file} or TAPEST_CLIENT_ICE_TOKEN env var")
+            "No API token configured. Set token in "
+            f"{config_file} or TAPEST_CLIENT_TOKEN env var")
     logger.debug("Config: host=%s account=%s",
-                 config.ice_host, config.storage_account_name)
+                 config.host, config.storage_account_name)
     return config
 
 

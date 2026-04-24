@@ -25,8 +25,8 @@ def pytest_runtest_setup(item):
 # -- Shared test defaults ----------------------------------------------------
 
 CLIENT_CONFIG_DEFAULT = Config(
-    ice_token="tok123",
-    ice_host="https://ice.example.com",
+    token="tok123",
+    host="https://ice.example.com",
     storage_account_name="testaccount",
     max_retry_attempts=2,
     default_sleep_duration=0,
@@ -37,7 +37,7 @@ CLIENT_CONFIG_DEFAULT = Config(
 # -- Shared fixtures ---------------------------------------------------------
 
 CONFIG_PARAMS = {
-    "ice_host": ["https://ice.local", "https://tapest.local"],
+    "host": ["https://ice.local", "https://tapest.local"],
     "verify_ssl": [True, False],
     "ca_cert_path": ["", "/etc/pki/tls/ca-bundle.pem"],
 }

@@ -5,10 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 0.0.6 - 2026-04-24
+
+### Changed
+- **Breaking:** Client config file is now JSON instead of INI. Standardized on JSON to match the ansible-deployed `/etc/tapest-client/client.conf`, the server config, and the e2e test fixtures. Existing INI configs must be reformatted to JSON, or deleted and regenerated with `tapest-client write-config`.
+- **Breaking:** Renamed config fields `ice_host` -> `host` and `ice_token` -> `token` (and env vars `TAPEST_CLIENT_ICE_HOST` / `TAPEST_CLIENT_ICE_TOKEN` -> `TAPEST_CLIENT_HOST` / `TAPEST_CLIENT_TOKEN`) to match the ansible-deployed key names. The `ice_` prefix was a relic of the pre-rebrand "CSC-ICE" naming.
+
 ## 0.0.5 - 2026-04-02
 
 ### Added
-- Command-line tool (`tapest-client`) with argparse (TAPEST-151)
+- Command-line tool (`tapest-client`) with argparse
   - `ingest-one` / `ingest-many` - upload files to the service
   - `extract-one` / `extract-many` - download files from the service
   - `delete` - delete a preserved file and its metadata
@@ -32,7 +38,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - `Config` dataclass with attribute access (`config.ice_host`) and type coercion driven by field annotations
 - `get_config()` loads from INI file and/or `TAPEST_CLIENT_*` env vars on first call, cached thereafter
-- Test plan docstrings for all test modules (TAPEST-158)
+- Test plan docstrings for all test modules
 
 ### Changed
 - **Breaking:** Config is now a dataclass, not a dict. All config keys are lowercase. Client code uses attribute access (`config.ice_token`) instead of dict access (`config["ICE_TOKEN"]`).

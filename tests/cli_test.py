@@ -214,7 +214,7 @@ def test_write_config_creates_file(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr("tapest_client.cli.USER_CONFIG_FILE", str(conf_path))
     _run_write_config(None, SimpleNamespace())
     assert conf_path.is_file()
-    assert "ice_token" in conf_path.read_text()
+    assert "token" in conf_path.read_text()
     assert "written to" in capsys.readouterr().out
 
 
@@ -231,9 +231,9 @@ def test_write_config_exits_if_exists(tmp_path, monkeypatch, capsys):
 
 
 def test_load_config_host_override(tmp_path):
-    """--host CLI flag overrides ice_host from config file."""
+    """--host CLI flag overrides host from config file."""
     conf = tmp_path / "client.conf"
-    conf.write_text("[tapest-client]\nice_host = https://h\nice_token = tok\n")
+    conf.write_text('{"host": "https://h", "token": "tok"}')
     args = SimpleNamespace(
         config=str(conf), host="https://override", ca_cert=None)
-    assert _load_config(args).ice_host == "https://override"
+    assert _load_config(args).host == "https://override"

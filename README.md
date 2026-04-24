@@ -44,17 +44,31 @@ The CLI looks for configuration in this order:
 3. `~/.config/tapest-client/client.conf` (user-level)
 
 Environment variables (`TAPEST_CLIENT_*`) override file values,
-e.g. `TAPEST_CLIENT_ICE_TOKEN`.
+e.g. `TAPEST_CLIENT_TOKEN`.
 
-Config file format:
+Config file format (JSON):
 
-```ini
-[tapest-client]
-ice_token = <token>
-ice_host = https://tapest.example.com
-storage_account_name = ida
-verify_ssl = true
+```json
+{
+  "token": "<token>",
+  "host": "https://tapest.example.com",
+  "storage_account_name": "ida",
+  "verify_ssl": true
+}
 ```
+
+### Config fields
+
+| Field                    | Type   | Default | Description                                                                                                            |
+|--------------------------|--------|---------|------------------------------------------------------------------------------------------------------------------------|
+| `token`                  | string | `""`    | API token for authentication. Replace with your own token.                                                             |
+| `host`                   | string | `""`    | TapeSt API host URL.                                                                                                   |
+| `storage_account_name`   | string | `""`    | Account name used for storage operations. Only needed for agent accounts; leave empty for storage client accounts.     |
+| `max_retry_attempts`     | int    | `10`    | Maximum number of retry attempts for API calls.                                                                        |
+| `default_sleep_duration` | int    | `120`   | Sleep duration (seconds) between retries.                                                                              |
+| `cleanup_on_fail`        | bool   | `false` | Remove local files on failed operations.                                                                               |
+| `verify_ssl`             | bool   | `true`  | Verify the SSL certificate of the host. Do *not* change this except for testing purposes.                              |
+| `ca_cert_path`           | string | `""`    | Path to a CA certificate bundle (PEM). When set, overrides the default certifi bundle. Leave empty to use the default. |
 
 ## Command-line usage
 
@@ -170,8 +184,8 @@ metadata = extract_file(config, "/path/to/file", "/local/path")
 from tapest_client import Config, extract_file
 
 config = Config(
-    ice_host="https://tapest-api.csc.fi",
-    ice_token="<token>",
+    host="https://tapest-api.csc.fi",
+    token="<token>",
 )
 
 metadata = extract_file(config, "/path/to/file", "/local/path")

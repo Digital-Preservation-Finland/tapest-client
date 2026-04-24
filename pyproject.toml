@@ -9,4 +9,5 @@ write_to = "tapest_client/_version.py"
 testpaths = ["tests"]
 markers = [
     "slow: slow tests such as benchmarks (skipped unless --run-slow is given)",
+    "benchmark: pytest-benchmark marker (registered to silence warning when the plugin is not installed)",
 ]

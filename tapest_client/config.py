@@ -1,5 +1,5 @@
 # ----------------------------------------------------------------------
-# This file is part of TapeSt – Tape Storage
+# This file is part of TapeSt - Tape Storage
 # The CSC Digital Preservation Tape Storage Service
 #
 # Copyright (C) 2025 CSC - IT Center for Science Ltd.
@@ -23,40 +23,39 @@
 # ----------------------------------------------------------------------
 """Configuration loading for tapest-client.
 
-Loads settings from an INI config file and/or environment variables.
-Environment variables override file values. Config file uses the
-``[tapest-client]`` section.
+Loads settings from a JSON config file and/or environment variables.
+Environment variables override file values.
 
 All keys are lowercase. Environment variables use the uppercase
-``TAPEST_CLIENT_`` prefix (e.g. ``TAPEST_CLIENT_ICE_TOKEN``).
+``TAPEST_CLIENT_`` prefix (e.g. ``TAPEST_CLIENT_TOKEN``).
 
 Example config file (``/etc/tapest-client/client.conf``)::
 
-    [tapest-client]
-    ice_token = <token>
-    ice_host = https://tapest-api.csc.fi
-    storage_account_name = ida
-    max_retry_attempts = 10
-    default_sleep_duration = 120
-    cleanup_on_fail = false
-    verify_ssl = true
-    ca_cert_path =
+    {
+        "token": "<token>",
+        "host": "https://tapest-api.csc.fi",
+        "storage_account_name": "ida",
+        "max_retry_attempts": 10,
+        "default_sleep_duration": 120,
+        "cleanup_on_fail": false,
+        "verify_ssl": true,
+        "ca_cert_path": ""
+    }
 
 Usage::
 
     from tapest_client.config import get_config
 
     config = get_config()    # loads on first call, cached thereafter
-    print(config.ice_host)
+    print(config.host)
 """
-import configparser
 import dataclasses
+import json
 import os
 from typing import Any
 
 
 CONFIG_FILE = "/etc/tapest-client/client.conf"
-CONFIG_SECTION = "tapest-client"
 
 _BOOL_STRINGS = {"true", "yes", "1"}
 
@@ -67,7 +66,7 @@ def _parse_bool(value: str) -> bool:
 
 
 def _coerce(field_type: type, value: Any) -> Any:
-    """Coerce a string value to the field's annotated type."""
+    """Coerce a value to the field's annotated type."""
     if field_type is int:
         return int(value)
     if field_type is bool:
@@ -78,8 +77,8 @@ def _coerce(field_type: type, value: Any) -> Any:
 @dataclasses.dataclass
 class Config:
     """TapeSt client configuration."""
-    ice_token: str = ""
-    ice_host: str = ""
+    token: str = ""
+    host: str = ""
     storage_account_name: str = ""
     max_retry_attempts: int = 10
     default_sleep_duration: int = 120
@@ -87,32 +86,27 @@ class Config:
     verify_ssl: bool = True
     ca_cert_path: str = ""
 
-    def read(self, config_file: str = CONFIG_FILE,
-             section: str = CONFIG_SECTION) -> None:
+    def read(self, config_file: str = CONFIG_FILE) -> None:
         """Load configuration from file and environment variables.
 
         Values are loaded in order of increasing priority:
 
-        1. Config file ``[section]`` (keys are lowercased by configparser)
+        1. JSON config file (flat object with lowercase keys)
         2. Environment variables (``TAPEST_CLIENT_<KEY>``, e.g.
-           ``TAPEST_CLIENT_ICE_HOST``)
+           ``TAPEST_CLIENT_HOST``)
 
         Args:
-            config_file: Path to INI config file.
-            section: Section name to read from the config file.
+            config_file: Path to JSON config file.
         """
         fields = {f.name: f for f in dataclasses.fields(self)}
 
-        # 1. Read from config file (configparser lowercases keys by default)
+        # 1. Read from JSON config file
         if os.path.isfile(config_file):
-            parser = configparser.ConfigParser()
-            parser.read(config_file)
-            if parser.has_section(section):
-                for name, field in fields.items():
-                    if parser.has_option(section, name):
-                        setattr(self, name, _coerce(
-                            field.type, parser.get(section, name)
-                        ))
+            with open(config_file, encoding="utf-8") as fh:
+                data = json.load(fh)
+            for name, field in fields.items():
+                if name in data:
+                    setattr(self, name, _coerce(field.type, data[name]))
 
         # 2. Override with environment variables (uppercase with prefix)
         for name, field in fields.items():

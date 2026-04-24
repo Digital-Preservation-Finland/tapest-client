@@ -124,9 +124,9 @@ def test_cleanup_missing_file_no_error(config_fx):
 
 
 def test_headers_minimal(config_fx):
-    """Only Authorization header with just ice_token."""
+    """Only Authorization header with just token."""
     cfg = config_fx(storage_account_name="")
-    expected = {"Authorization": f"Bearer {cfg.ice_token}"}
+    expected = {"Authorization": f"Bearer {cfg.token}"}
     assert _build_headers(cfg) == expected
 
 
@@ -135,7 +135,7 @@ def test_headers_all_options(config_fx):
     cfg = config_fx()
     headers = _build_headers(cfg, storage_name="s1",
                              extra={"X-Custom": "val"})
-    assert headers["Authorization"] == f"Bearer {cfg.ice_token}"
+    assert headers["Authorization"] == f"Bearer {cfg.token}"
     assert headers["X-ICE-Account"] == cfg.storage_account_name
     assert headers["X-ICE-Storage"] == "s1"
     assert headers["X-Custom"] == "val"
@@ -147,21 +147,21 @@ def test_headers_all_options(config_fx):
 def test_file_url(config_fx):
     """Builds /file endpoint URL with encoded identifier."""
     cfg = config_fx()
-    expected = f"{cfg.ice_host}/file?identifier=%2Fpath%2Fto%2Ffile.dat"
+    expected = f"{cfg.host}/file?identifier=%2Fpath%2Fto%2Ffile.dat"
     assert _file_url(cfg, "/path/to/file.dat") == expected
 
 
 def test_metadata_url_with_identifier(config_fx):
     """Builds /metadata endpoint URL with encoded identifier."""
     cfg = config_fx()
-    expected = f"{cfg.ice_host}/metadata?identifier=%2Fmyfile.dat"
+    expected = f"{cfg.host}/metadata?identifier=%2Fmyfile.dat"
     assert _metadata_url(cfg, "/myfile.dat") == expected
 
 
 def test_metadata_url_without_identifier(config_fx):
     """Builds bare /metadata URL when no identifier given."""
     cfg = config_fx()
-    assert _metadata_url(cfg) == f"{cfg.ice_host}/metadata"
+    assert _metadata_url(cfg) == f"{cfg.host}/metadata"
 
 
 # === _request_with_retry ===

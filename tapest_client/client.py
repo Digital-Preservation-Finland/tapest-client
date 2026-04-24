@@ -24,8 +24,8 @@
 # TapeSt API client library. Accepts a Config instance or any object
 # supporting attribute access for:
 #
-#     config.ice_token                # required
-#     config.ice_host                 # required
+#     config.token                # required
+#     config.host                 # required
 #     config.storage_account_name     # optional
 #     config.max_retry_attempts       # optional (default: 10)
 #     config.default_sleep_duration   # optional (default: 120)
@@ -68,7 +68,7 @@ class TapestClientError(Exception):
 def _build_headers(config: Config, storage_name: str | None = None,
                    extra: dict[str, str] | None = None) -> dict[str, str]:
     """Build common request headers from config."""
-    headers = {"Authorization": f"Bearer {config.ice_token}"}
+    headers = {"Authorization": f"Bearer {config.token}"}
     if config.storage_account_name:
         headers["X-ICE-Account"] = config.storage_account_name
     if storage_name:
@@ -81,15 +81,15 @@ def _build_headers(config: Config, storage_name: str | None = None,
 def _file_url(config: Config, identifier: str) -> str:
     """Build /file endpoint URL."""
     encoded = urllib.parse.quote(identifier, safe="")
-    return f"{config.ice_host}/file?identifier={encoded}"
+    return f"{config.host}/file?identifier={encoded}"
 
 
 def _metadata_url(config: Config, identifier: str | None = None) -> str:
     """Build /metadata endpoint URL."""
     if identifier:
         encoded = urllib.parse.quote(identifier, safe="")
-        return f"{config.ice_host}/metadata?identifier={encoded}"
-    return f"{config.ice_host}/metadata"
+        return f"{config.host}/metadata?identifier={encoded}"
+    return f"{config.host}/metadata"
 
 
 def _verify_param(config: Config) -> str | bool:
@@ -409,8 +409,8 @@ def retrieve_metadata(config: Config, query: dict | None = None,
 
 def retrieve_status(config: Config) -> dict:
     """Retrieve service status."""
-    url = f"{config.ice_host}/status"
-    headers = {"Authorization": f"Bearer {config.ice_token}"}
+    url = f"{config.host}/status"
+    headers = {"Authorization": f"Bearer {config.token}"}
     verify_ssl = _verify_param(config)
     response = requests.get(url, headers=headers, verify=verify_ssl)
     if response.status_code == 200:
