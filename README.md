@@ -70,6 +70,14 @@ Config file format (JSON):
 | `verify_ssl`             | bool   | `true`  | Verify the SSL certificate of the host. Do *not* change this except for testing purposes.                              |
 | `ca_cert_path`           | string | `""`    | Path to a CA certificate bundle (PEM). When set, overrides the default certifi bundle. Leave empty to use the default. |
 
+## File identifiers
+
+`FILE_ID` values are sent to the API as-is. The API normalizes them
+to UTF-8 NFC on receive, so the stored identifier returned by the API
+may differ from the value passed in (for example, an identifier
+containing NFD `a` + combining diaeresis is returned as NFC
+`a-umlaut`).
+
 ## Command-line usage
 
 For per-command help, use `tapest-client <command> --help`.

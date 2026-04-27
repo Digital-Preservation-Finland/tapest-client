@@ -34,6 +34,12 @@
 #     config.ca_cert_path             # optional (default: "")
 #
 # Dict-style access (config["key"]) is also supported via Config.
+#
+# File identifiers are normalized to UTF-8 NFC by the API on receive.
+# The client passes identifiers through unchanged; the canonical NFC
+# form is returned in API responses, so an identifier passed in NFD
+# (e.g. "a" + combining diaeresis) will appear as NFC ("a-umlaut") in
+# the returned metadata.
 # ----------------------------------------------------------------------
 
 from __future__ import annotations
@@ -162,6 +168,10 @@ def ingest_file(config: Config, identifier: str, local_file_pathname: str,
 
     A single stat() call is used to collect size, creation time and
     modification time, avoiding redundant filesystem round-trips.
+
+    The ``identifier`` is sent to the API as-is. The API normalizes it
+    to UTF-8 NFC, so the ``identifier`` field in the returned metadata
+    may differ from the value passed in.
     """
     path = Path(local_file_pathname)
     stat = path.stat()
