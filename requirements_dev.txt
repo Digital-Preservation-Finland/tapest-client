@@ -1,2 +1,6 @@
 # Testing requirements
 pytest
+requests-mock
+
+# Dependencies
+requests

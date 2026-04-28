@@ -6,6 +6,7 @@ responses. All HTTP calls are mocked via the ``requests_fx`` fixture.
 """
 
 import pytest
+import requests_mock
 
 from tapest_client.client import (
     TapestClientError,
@@ -290,7 +291,7 @@ def test_ingest_directory_new_files(tmp_path, config_fx, requests_fx):
     assert len(result) == 2
 
 
-def test_ingest_directory_skip_existing(tmp_path, config_fx, requests_fx):
+def test_ingest_directory_skip_existing(tmp_path, config_fx):
     """skip=True skips files that match server metadata."""
     root = tmp_path / "pkg"
     root.mkdir()
@@ -298,38 +299,61 @@ def test_ingest_directory_skip_existing(tmp_path, config_fx, requests_fx):
     path.write_bytes(b"hello world")
     checksum = generate_checksum(path)
     meta = {**SAMPLE_METADATA, "size": 11, "checksum": checksum}
-    requests_fx.responses["get"] = mock_response(200, json_data=meta)
-    result = ingest_files_from_directory(
-        config_fx(), str(root), skip=True)
+    config = config_fx()
+    with requests_mock.Mocker() as mock:
+        mock.put(url=f"{config.host}/file", status_code=409)
+        mock.get(url=f"{config.host}/metadata", json=meta)
+        result = ingest_files_from_directory(
+            config=config,
+            local_directory_pathname=str(root),
+            skip=True,
+        )
     assert len(result) == 0
 
 
-def test_ingest_directory_force_replaces(
-        tmp_path, config_fx, requests_fx):
+def test_ingest_directory_force_replaces(tmp_path, config_fx):
     """force=True deletes and re-ingests files that differ from server."""
     root = tmp_path / "pkg"
     root.mkdir()
     (root / "a.dat").write_bytes(b"new content")
     meta = {**SAMPLE_METADATA, "size": 5, "checksum": "sha256:old"}
-    requests_fx.responses["get"] = mock_response(200, json_data=meta)
-    requests_fx.responses["delete"] = mock_response(204)
-    requests_fx.responses["put"] = mock_response(
-        201, json_data=SAMPLE_METADATA)
-    result = ingest_files_from_directory(
-        config_fx(), str(root), force=True)
-    assert len(result) == 1
+    config = config_fx()
+    with requests_mock.Mocker() as mock:
+        mock.put(
+            url=f"{config.host}/file",
+            response_list=[
+                {"status_code": 409},
+                {"status_code": 201, "json": meta},
+            ],
+        )
+        mock.get(url=f"{config.host}/metadata", json=SAMPLE_METADATA)
+        mock.delete(url=f"{config.host}/file", status_code=204)
+        result = ingest_files_from_directory(
+            config=config,
+            local_directory_pathname=str(root),
+            force=True,
+        )
+        assert len(result) == 1
+        assert mock.call_count == 4
 
 
-def test_ingest_directory_conflict_raises(
-        tmp_path, config_fx, requests_fx):
+def test_ingest_directory_conflict_raises(tmp_path, config_fx):
     """Raises if file exists on server and neither skip nor force is set."""
     root = tmp_path / "pkg"
     root.mkdir()
-    (root / "a.dat").write_bytes(b"data")
-    requests_fx.responses["get"] = mock_response(
-        200, json_data=SAMPLE_METADATA)
-    with pytest.raises(TapestClientError, match="already exists"):
-        ingest_files_from_directory(config_fx(), str(root))
+    path = root / "a.dat"
+    path.write_bytes(b"data")
+    checksum = generate_checksum(path)
+    meta = {**SAMPLE_METADATA, "size": 11, "checksum": checksum}
+    config = config_fx()
+    with requests_mock.Mocker() as mock:
+        mock.put(url=f"{config.host}/file", status_code=409)
+        mock.get(url=f"{config.host}/metadata", json=meta)
+        with pytest.raises(TapestClientError, match="already exists"):
+            ingest_files_from_directory(
+                config=config,
+                local_directory_pathname=str(root),
+            )
 
 
 def test_ingest_directory_skips_subdirectories(

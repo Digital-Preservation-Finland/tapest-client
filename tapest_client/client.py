@@ -55,6 +55,7 @@ from pathlib import Path
 from collections.abc import Callable
 
 import requests
+from requests.exceptions import HTTPError
 
 from tapest_client.config import Config
 
@@ -162,8 +163,14 @@ def cleanup_file(config: Config, local_file_pathname: str) -> None:
 # === Core Operation Functions ===
 
 
-def ingest_file(config: Config, identifier: str, local_file_pathname: str,
-                storage_name: str | None = None) -> dict:
+def ingest_file(
+    config: Config,
+    identifier: str,
+    local_file_pathname: str,
+    storage_name: str | None = None,
+    checksum: str | None = None,
+    raise_for_status: bool = False,
+) -> dict:
     """Ingest a local file and return its metadata.
 
     A single stat() call is used to collect size, creation time and
@@ -172,24 +179,38 @@ def ingest_file(config: Config, identifier: str, local_file_pathname: str,
     The ``identifier`` is sent to the API as-is. The API normalizes it
     to UTF-8 NFC, so the ``identifier`` field in the returned metadata
     may differ from the value passed in.
+
+    :param config: Config instance.
+    :param identifier: File identifier.
+    :param local_file_pathname: Local file URI.
+    :param storage_name: Storage name to upload to.
+    :param checksum: Pre-given checksum so that checksum calculation
+        can be given during this function's call.
+    :param raise_for_status: Boolean whether requests-call response should
+        try to raise an exception.
     """
     path = Path(local_file_pathname)
     stat = path.stat()
-    checksum = generate_checksum(path)
-    created = datetime.fromtimestamp(
-        stat.st_ctime, timezone.utc
-    ).strftime(TIMESTAMP_FORMAT)
-    modified = datetime.fromtimestamp(
-        stat.st_mtime, timezone.utc
-    ).strftime(TIMESTAMP_FORMAT)
+    if checksum is None:
+        checksum = generate_checksum(local_file_pathname=path)
+    created = datetime.fromtimestamp(stat.st_ctime, timezone.utc).strftime(
+        TIMESTAMP_FORMAT
+    )
+    modified = datetime.fromtimestamp(stat.st_mtime, timezone.utc).strftime(
+        TIMESTAMP_FORMAT
+    )
 
     url = _file_url(config, identifier)
-    headers = _build_headers(config, storage_name, {
-        "X-ICE-Size": str(stat.st_size),
-        "X-ICE-Checksum": checksum,
-        "X-ICE-Created": created,
-        "X-ICE-Modified": modified,
-    })
+    headers = _build_headers(
+        config,
+        storage_name,
+        {
+            "X-ICE-Size": str(stat.st_size),
+            "X-ICE-Checksum": checksum,
+            "X-ICE-Created": created,
+            "X-ICE-Modified": modified,
+        },
+    )
     verify_ssl = _verify_param(config)
 
     def do_request():
@@ -203,6 +224,8 @@ def ingest_file(config: Config, identifier: str, local_file_pathname: str,
     )
     if response.status_code == 201:
         return response.json()
+    if raise_for_status:
+        response.raise_for_status()
     raise TapestClientError(
         f"Failed to ingest file {identifier}: "
         f"{response.status_code} {response.text}"
@@ -434,10 +457,13 @@ def retrieve_status(config: Config) -> dict:
 # === Batch Operation Functions ===
 
 
-def ingest_files_from_directory(config: Config, local_directory_pathname: str,
-                                skip: bool = False,
-                                force: bool = False,
-                                prefix: str | None = None) -> list[dict]:
+def ingest_files_from_directory(
+    config: Config,
+    local_directory_pathname: str,
+    skip: bool = False,
+    force: bool = False,
+    prefix: str | None = None,
+) -> list[dict]:
     """Ingest all files from a directory tree.
 
     Identifiers are derived from relative paths within the directory.
@@ -467,41 +493,47 @@ def ingest_files_from_directory(config: Config, local_directory_pathname: str,
         if not path.is_file():
             continue
         identifier = prefix + "/" + path.relative_to(root).as_posix()
-
-        existing = _find_file_metadata(config, identifier)
-        if existing is None:
-            ingested.append(ingest_file(config, identifier, str(path)))
-            continue
-        if not (skip or force):
-            # Raise before hashing; is_same_file reads the whole file.
-            raise TapestClientError(
-                f"File already exists with identifier {identifier}"
+        checksum = generate_checksum(local_file_pathname=path)
+        try:
+            ingested.append(
+                ingest_file(
+                    config=config,
+                    identifier=identifier,
+                    local_file_pathname=str(path),
+                    checksum=checksum,
+                    raise_for_status=True,
+                )
             )
-        same = is_same_file(
-            str(path), existing["size"], existing["checksum"]
-        )
-        action = _conflict_action(skip, force, same)
-        if action is _ConflictAction.SKIP:
             continue
-        if action is _ConflictAction.REPLACE:
+        except HTTPError as err:
+            if err.response.status_code != 409:
+                raise TapestClientError(
+                    f"Failed to ingest file {identifier}: "
+                    f"{err.response.status_code} {err.response.text}"
+                ) from err
+
+        file_metadata = retrieve_file_metadata(config, identifier)
+
+        same = checksum == file_metadata["checksum"]
+        if skip and same:
+            continue
+        if force and not same:
             delete_file(config, identifier)
-            ingested.append(ingest_file(config, identifier, str(path)))
+            ingested.append(
+                ingest_file(
+                    config=config,
+                    identifier=identifier,
+                    local_file_pathname=str(path),
+                    checksum=checksum,
+                )
+            )
             continue
+
         raise TapestClientError(
             f"File already exists with identifier {identifier}"
         )
 
     return ingested
-
-
-def _find_file_metadata(config: Config, identifier: str) -> dict | None:
-    """Return file metadata, or None if the file does not exist."""
-    try:
-        return retrieve_file_metadata(config, identifier)
-    except TapestClientError as e:
-        if "404" not in str(e):
-            raise
-        return None
 
 
 class _ConflictAction(Enum):

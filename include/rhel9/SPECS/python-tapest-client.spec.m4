@@ -24,6 +24,7 @@ BuildRequires:  %{py3_dist setuptools}
 BuildRequires:  %{py3_dist setuptools-scm}
 BuildRequires:  %{py3_dist wheel}
 BuildRequires:  %{py3_dist pytest}
+BuildRequires:  %{py3_dist requests-mock}
 
 Requires:       python3-certifi
 
