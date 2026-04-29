@@ -8,7 +8,7 @@ import pytest
 from tapest_client.cli import (
     build_parser, main, _load_config,
     _run_status, _run_write_config, _run_ingest, _run_extract, _run_delete,
-    _run_query_metadata, _run_update_metadata, _run_ingest_directory,
+    _run_query_metadata, _run_update_metadata, _run_ingest_many,
     _run_extract_files,
 )
 from tapest_client import TapestClientError
@@ -70,6 +70,17 @@ def test_metadata_query_params():
     assert args.limit == 10
 
 
+def test_ingest_many_parses_options():
+    """ingest-many parses one-or-more paths plus --prefix/--skip/--force."""
+    args = build_parser().parse_args([
+        "ingest-many", "--prefix", "acme", "--skip",
+        "/path/a.dat", "/path/b.dat", "/path/dir1"])
+    assert args.paths == ["/path/a.dat", "/path/b.dat", "/path/dir1"]
+    assert args.prefix == "acme"
+    assert args.skip is True
+    assert args.force is False
+
+
 def test_extract_with_next_id():
     """extract-one accepts optional next file identifier."""
     args = build_parser().parse_args(
@@ -96,6 +107,15 @@ def test_ingest_calls_library(config_fx, cli_fx, capsys):
     assert cli_fx.calls["ingest_file"] == [
         (("/id", "/path"), {"storage_name": None})]
     assert json.loads(capsys.readouterr().out)["identifier"] == "/id"
+
+
+def test_ingest_normalizes_leading_slash(config_fx, cli_fx):
+    """ingest-one prepends a leading '/' if the user omits it."""
+    cli_fx("ingest_file", return_value={"identifier": "/id"})
+    args = SimpleNamespace(file_id="id", local_path="/path", storage=None)
+    _run_ingest(config_fx(), args)
+    assert cli_fx.calls["ingest_file"] == [
+        (("/id", "/path"), {"storage_name": None})]
 
 
 def test_extract_calls_library(config_fx, cli_fx):
@@ -163,14 +183,98 @@ def test_update_metadata(config_fx, cli_fx, capsys):
 
 # -- Batch operations ---------------------------------------------------------
 
-def test_ingest_directory(config_fx, cli_fx, capsys):
-    """ingest-many prints JSON list of ingested files."""
-    results = [{"identifier": "/a"}, {"identifier": "/b"}]
-    cli_fx("ingest_files_from_directory", return_value=results)
-    args = SimpleNamespace(local_dir="/dir", skip=False, force=False,
-                           prefix=None)
-    _run_ingest_directory(config_fx(), args)
-    assert len(json.loads(capsys.readouterr().out)) == 2
+def test_ingest_many_files(tmp_path, monkeypatch, config_fx, cli_fx):
+    """Plain file paths become identifiers built from the path-as-given."""
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "a.dat").write_bytes(b"a")
+    (tmp_path / "b.dat").write_bytes(b"b")
+    cli_fx("ingest_files", return_value=[])
+    args = SimpleNamespace(
+        paths=["a.dat", "b.dat"], skip=False, force=False, prefix=None)
+    _run_ingest_many(config_fx(), args)
+    assert cli_fx.calls["ingest_files"] == [(
+        ([("/a.dat", "a.dat"), ("/b.dat", "b.dat")],),
+        {"skip": False, "force": False},
+    )]
+
+
+def test_ingest_many_directory(tmp_path, monkeypatch, config_fx, cli_fx):
+    """A directory is walked; each file's identifier extends the dir path."""
+    monkeypatch.chdir(tmp_path)
+    d = tmp_path / "acme"
+    d.mkdir()
+    (d / "a.dat").write_bytes(b"a")
+    (d / "sub").mkdir()
+    (d / "sub" / "b.dat").write_bytes(b"b")
+    cli_fx("ingest_files", return_value=[])
+    args = SimpleNamespace(
+        paths=["acme"], skip=False, force=False, prefix=None)
+    _run_ingest_many(config_fx(), args)
+    assert cli_fx.calls["ingest_files"] == [(
+        ([("/acme/a.dat", "acme/a.dat"),
+          ("/acme/sub/b.dat", "acme/sub/b.dat")],),
+        {"skip": False, "force": False},
+    )]
+
+
+def test_ingest_many_mixed(tmp_path, monkeypatch, config_fx, cli_fx):
+    """Files and directories can be passed together in one invocation."""
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "loose.dat").write_bytes(b"x")
+    d = tmp_path / "dir1"
+    d.mkdir()
+    (d / "in.dat").write_bytes(b"y")
+    cli_fx("ingest_files", return_value=[])
+    args = SimpleNamespace(
+        paths=["loose.dat", "dir1"], skip=False, force=False, prefix=None)
+    _run_ingest_many(config_fx(), args)
+    assert cli_fx.calls["ingest_files"] == [(
+        ([("/loose.dat", "loose.dat"),
+          ("/dir1/in.dat", "dir1/in.dat")],),
+        {"skip": False, "force": False},
+    )]
+
+
+def test_ingest_many_with_prefix(tmp_path, monkeypatch, config_fx, cli_fx):
+    """--prefix is prepended to every derived identifier."""
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "a.dat").write_bytes(b"a")
+    d = tmp_path / "dir1"
+    d.mkdir()
+    (d / "b.dat").write_bytes(b"b")
+    cli_fx("ingest_files", return_value=[])
+    args = SimpleNamespace(
+        paths=["a.dat", "dir1"], skip=False, force=False, prefix="acme/2024")
+    _run_ingest_many(config_fx(), args)
+    assert cli_fx.calls["ingest_files"] == [(
+        ([("/acme/2024/a.dat", "a.dat"),
+          ("/acme/2024/dir1/b.dat", "dir1/b.dat")],),
+        {"skip": False, "force": False},
+    )]
+
+
+def test_ingest_many_missing_path(tmp_path, config_fx):
+    """ingest-many raises if a CLI path is neither file nor directory."""
+    args = SimpleNamespace(
+        paths=[str(tmp_path / "nope.dat")], skip=False, force=False,
+        prefix=None)
+    with pytest.raises(TapestClientError, match="does not exist"):
+        _run_ingest_many(config_fx(), args)
+
+
+@pytest.mark.parametrize("prefix_input", [
+    "acme/2024", "/acme/2024", "acme/2024/", "/acme/2024/", "//acme/2024//"])
+def test_ingest_many_prefix_normalization(
+        tmp_path, monkeypatch, config_fx, cli_fx, prefix_input):
+    """--prefix is normalized to a single leading '/' with no trailing '/'."""
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "a.dat").write_bytes(b"a")
+    cli_fx("ingest_files", return_value=[])
+    args = SimpleNamespace(
+        paths=["a.dat"], skip=False, force=False, prefix=prefix_input)
+    _run_ingest_many(config_fx(), args)
+    assert cli_fx.calls["ingest_files"][0][0][0] == [
+        ("/acme/2024/a.dat", "a.dat")]
 
 
 def test_extract_files(config_fx, cli_fx, capsys):

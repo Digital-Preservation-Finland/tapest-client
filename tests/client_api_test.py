@@ -19,7 +19,7 @@ from tapest_client.client import (
     update_file_metadata,
     retrieve_metadata,
     retrieve_status,
-    ingest_files_from_directory,
+    ingest_files,
     extract_files_to_directory,
     generate_checksum,
 )
@@ -269,33 +269,27 @@ def test_retrieve_status_success(config_fx, requests_fx):
     assert retrieve_status(config_fx()) == {"status": "ok"}
 
 
-# === ingest_files_from_directory ===
+# === ingest_files ===
 
 
-def test_ingest_directory_not_a_directory(tmp_path, config_fx):
-    """Raises if path does not exist."""
-    with pytest.raises(TapestClientError, match="does not exist"):
-        ingest_files_from_directory(config_fx(), str(tmp_path / "nope"))
-
-
-def test_ingest_directory_new_files(tmp_path, config_fx, requests_fx):
-    """Files not yet on server are ingested."""
-    root = tmp_path / "pkg"
-    root.mkdir()
-    (root / "a.dat").write_bytes(b"aaa")
-    (root / "b.dat").write_bytes(b"bbb")
-    requests_fx.responses["get"] = TapestClientError("404 Not Found")
-    requests_fx.responses["put"] = mock_response(
-        201, json_data=SAMPLE_METADATA)
-    result = ingest_files_from_directory(config_fx(), str(root))
+def test_ingest_files_new(tmp_path, config_fx):
+    """ingest_files uploads each (identifier, path) pair."""
+    f1 = tmp_path / "a.dat"
+    f2 = tmp_path / "b.dat"
+    f1.write_bytes(b"aaa")
+    f2.write_bytes(b"bbb")
+    config = config_fx()
+    with requests_mock.Mocker() as mock:
+        mock.put(url=f"{config.host}/file",
+                 status_code=201, json=SAMPLE_METADATA)
+        result = ingest_files(
+            config, [("/pkg/a.dat", str(f1)), ("/pkg/b.dat", str(f2))])
     assert len(result) == 2
 
 
-def test_ingest_directory_skip_existing(tmp_path, config_fx):
+def test_ingest_files_skip_existing(tmp_path, config_fx):
     """skip=True skips files that match server metadata."""
-    root = tmp_path / "pkg"
-    root.mkdir()
-    path = root / "a.dat"
+    path = tmp_path / "a.dat"
     path.write_bytes(b"hello world")
     checksum = generate_checksum(path)
     meta = {**SAMPLE_METADATA, "size": 11, "checksum": checksum}
@@ -303,19 +297,27 @@ def test_ingest_directory_skip_existing(tmp_path, config_fx):
     with requests_mock.Mocker() as mock:
         mock.put(url=f"{config.host}/file", status_code=409)
         mock.get(url=f"{config.host}/metadata", json=meta)
-        result = ingest_files_from_directory(
-            config=config,
-            local_directory_pathname=str(root),
-            skip=True,
-        )
+        result = ingest_files(
+            config, [("/pkg/a.dat", str(path))], skip=True)
     assert len(result) == 0
 
 
-def test_ingest_directory_force_replaces(tmp_path, config_fx):
+def test_ingest_files_conflict_raises(tmp_path, config_fx):
+    """Raises if identifier exists on server and neither skip nor force."""
+    path = tmp_path / "a.dat"
+    path.write_bytes(b"data")
+    config = config_fx()
+    with requests_mock.Mocker() as mock:
+        mock.put(url=f"{config.host}/file", status_code=409)
+        mock.get(url=f"{config.host}/metadata", json=SAMPLE_METADATA)
+        with pytest.raises(TapestClientError, match="already exists"):
+            ingest_files(config, [("/pkg/a.dat", str(path))])
+
+
+def test_ingest_files_force_replaces(tmp_path, config_fx):
     """force=True deletes and re-ingests files that differ from server."""
-    root = tmp_path / "pkg"
-    root.mkdir()
-    (root / "a.dat").write_bytes(b"new content")
+    path = tmp_path / "a.dat"
+    path.write_bytes(b"new content")
     meta = {**SAMPLE_METADATA, "size": 5, "checksum": "sha256:old"}
     config = config_fx()
     with requests_mock.Mocker() as mock:
@@ -326,104 +328,12 @@ def test_ingest_directory_force_replaces(tmp_path, config_fx):
                 {"status_code": 201, "json": meta},
             ],
         )
-        mock.get(url=f"{config.host}/metadata", json=SAMPLE_METADATA)
+        mock.get(url=f"{config.host}/metadata", json=meta)
         mock.delete(url=f"{config.host}/file", status_code=204)
-        result = ingest_files_from_directory(
-            config=config,
-            local_directory_pathname=str(root),
-            force=True,
-        )
+        result = ingest_files(
+            config, [("/pkg/a.dat", str(path))], force=True)
         assert len(result) == 1
         assert mock.call_count == 4
-
-
-def test_ingest_directory_conflict_raises(tmp_path, config_fx):
-    """Raises if file exists on server and neither skip nor force is set."""
-    root = tmp_path / "pkg"
-    root.mkdir()
-    path = root / "a.dat"
-    path.write_bytes(b"data")
-    checksum = generate_checksum(path)
-    meta = {**SAMPLE_METADATA, "size": 11, "checksum": checksum}
-    config = config_fx()
-    with requests_mock.Mocker() as mock:
-        mock.put(url=f"{config.host}/file", status_code=409)
-        mock.get(url=f"{config.host}/metadata", json=meta)
-        with pytest.raises(TapestClientError, match="already exists"):
-            ingest_files_from_directory(
-                config=config,
-                local_directory_pathname=str(root),
-            )
-
-
-def test_ingest_directory_skips_subdirectories(
-        tmp_path, config_fx, requests_fx):
-    """Only regular files are ingested, subdirectories are skipped."""
-    root = tmp_path / "pkg"
-    root.mkdir()
-    (root / "sub").mkdir()
-    (root / "a.dat").write_bytes(b"data")
-    requests_fx.responses["get"] = TapestClientError("404")
-    requests_fx.responses["put"] = mock_response(
-        201, json_data=SAMPLE_METADATA)
-    result = ingest_files_from_directory(config_fx(), str(root))
-    assert len(result) == 1
-
-
-def test_ingest_directory_default_prefix(tmp_path, config_fx, requests_fx):
-    """Default prefix is /<directory-basename>."""
-    root = tmp_path / "mydata"
-    root.mkdir()
-    (root / "file.dat").write_bytes(b"data")
-    meta = {**SAMPLE_METADATA, "identifier": "/mydata/file.dat"}
-    requests_fx.responses["get"] = TapestClientError("404")
-    requests_fx.responses["put"] = mock_response(201, json_data=meta)
-    result = ingest_files_from_directory(config_fx(), str(root))
-    assert result[0]["identifier"] == "/mydata/file.dat"
-
-
-def test_ingest_directory_custom_prefix(tmp_path, config_fx, requests_fx):
-    """Custom prefix replaces the default directory basename."""
-    root = tmp_path / "mydata"
-    root.mkdir()
-    (root / "file.dat").write_bytes(b"data")
-    meta = {**SAMPLE_METADATA, "identifier": "/kuvi/2024/file.dat"}
-    requests_fx.responses["get"] = TapestClientError("404")
-    requests_fx.responses["put"] = mock_response(201, json_data=meta)
-    result = ingest_files_from_directory(
-        config_fx(), str(root), prefix="kuvi/2024")
-    assert result[0]["identifier"] == "/kuvi/2024/file.dat"
-
-
-def test_ingest_directory_custom_prefix_nested(
-        tmp_path, config_fx, requests_fx):
-    """Custom prefix works with nested directory structure."""
-    root = tmp_path / "mydata"
-    sub = root / "sub"
-    sub.mkdir(parents=True)
-    (sub / "file.dat").write_bytes(b"data")
-    meta = {**SAMPLE_METADATA, "identifier": "/archive/sub/file.dat"}
-    requests_fx.responses["get"] = TapestClientError("404")
-    requests_fx.responses["put"] = mock_response(201, json_data=meta)
-    result = ingest_files_from_directory(
-        config_fx(), str(root), prefix="archive")
-    assert result[0]["identifier"] == "/archive/sub/file.dat"
-
-
-@pytest.mark.parametrize("prefix", [
-    "kuvi/2024", "/kuvi/2024", "kuvi/2024/", "/kuvi/2024/", "//kuvi/2024//"])
-def test_ingest_directory_prefix_normalization(
-        tmp_path, config_fx, requests_fx, prefix):
-    """Prefix is normalized to a single leading '/' with no trailing '/'."""
-    root = tmp_path / "mydata"
-    root.mkdir()
-    (root / "file.dat").write_bytes(b"data")
-    meta = {**SAMPLE_METADATA, "identifier": "/kuvi/2024/file.dat"}
-    requests_fx.responses["get"] = TapestClientError("404")
-    requests_fx.responses["put"] = mock_response(201, json_data=meta)
-    result = ingest_files_from_directory(
-        config_fx(), str(root), prefix=prefix)
-    assert result[0]["identifier"] == "/kuvi/2024/file.dat"
 
 
 # === extract_files_to_directory ===

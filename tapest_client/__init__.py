@@ -22,7 +22,7 @@ from .client import (
     update_file_metadata,
     retrieve_metadata,
     retrieve_status,
-    ingest_files_from_directory,
+    ingest_files,
     extract_files_to_directory,
 )
 
@@ -42,6 +42,6 @@ __all__ = [
     "update_file_metadata",
     "retrieve_metadata",
     "retrieve_status",
-    "ingest_files_from_directory",
+    "ingest_files",
     "extract_files_to_directory",
 ]

@@ -457,49 +457,29 @@ def retrieve_status(config: Config) -> dict:
 # === Batch Operation Functions ===
 
 
-def ingest_files_from_directory(
+def ingest_files(
     config: Config,
-    local_directory_pathname: str,
+    files: list[tuple[str, str]],
     skip: bool = False,
     force: bool = False,
-    prefix: str | None = None,
 ) -> list[dict]:
-    """Ingest all files from a directory tree.
+    """Ingest a list of files with explicit identifiers.
 
-    Identifiers are derived from relative paths within the directory.
-    By default, the directory basename is used as prefix:
-        directory:  /path/to/200182
-        file:       /path/to/200182/sub/file.dat
-        identifier: /200182/sub/file.dat
-
-    When ``prefix`` is given, it replaces the directory basename. The
-    prefix is normalized to a single leading ``/`` with no trailing ``/``:
-        prefix:     kuvi/2024
-        identifier: /kuvi/2024/sub/file.dat
+    ``files`` is a list of ``(identifier, local_pathname)`` tuples.
+    By default, an identifier that already exists on the server raises;
+    ``skip`` skips matching files; ``force`` replaces differing files.
+    The checksum is computed once per file and reused for both the
+    conflict comparison and any retry PUT.
     """
-    root = Path(local_directory_pathname).resolve()
-    if not root.is_dir():
-        raise TapestClientError(
-            f"Directory does not exist: {local_directory_pathname}"
-        )
-
-    if prefix is None:
-        prefix = "/" + root.name
-    else:
-        prefix = "/" + prefix.strip("/")
-
     ingested = []
-    for path in sorted(root.rglob("*")):
-        if not path.is_file():
-            continue
-        identifier = prefix + "/" + path.relative_to(root).as_posix()
-        checksum = generate_checksum(local_file_pathname=path)
+    for identifier, local_path in files:
+        checksum = generate_checksum(local_file_pathname=local_path)
         try:
             ingested.append(
                 ingest_file(
                     config=config,
                     identifier=identifier,
-                    local_file_pathname=str(path),
+                    local_file_pathname=local_path,
                     checksum=checksum,
                     raise_for_status=True,
                 )
@@ -513,7 +493,6 @@ def ingest_files_from_directory(
                 ) from err
 
         file_metadata = retrieve_file_metadata(config, identifier)
-
         same = checksum == file_metadata["checksum"]
         if skip and same:
             continue
@@ -523,7 +502,7 @@ def ingest_files_from_directory(
                 ingest_file(
                     config=config,
                     identifier=identifier,
-                    local_file_pathname=str(path),
+                    local_file_pathname=local_path,
                     checksum=checksum,
                 )
             )

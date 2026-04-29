@@ -5,11 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## 0.0.6 - 2026-04-24
+## 0.0.6 - 2026-04-29
+
+### Added
+- `ingest-many` now accepts any mix of file paths and directory paths in a single invocation. Each argument's identifier is derived from the path as given; directories are walked recursively and each contained file's identifier extends the directory path with its relative location. `--prefix` is prepended to every derived identifier.
+- `ingest-one` now prepends a leading `/` to the supplied FILE_ID if omitted, so identifiers stored via `ingest-one` and `ingest-many` share the same leading-slash convention and behave consistently with later prefix queries.
+- `certifi` dependency so SSL verification uses the system CA trust store by default.
 
 ### Changed
 - **Breaking:** Client config file is now JSON instead of INI. Standardized on JSON to match the ansible-deployed `/etc/tapest-client/client.conf`, the server config, and the e2e test fixtures. Existing INI configs must be reformatted to JSON, or deleted and regenerated with `tapest-client write-config`.
 - **Breaking:** Renamed config fields `ice_host` -> `host` and `ice_token` -> `token` (and env vars `TAPEST_CLIENT_ICE_HOST` / `TAPEST_CLIENT_ICE_TOKEN` -> `TAPEST_CLIENT_HOST` / `TAPEST_CLIENT_TOKEN`) to match the ansible-deployed key names. The `ice_` prefix was a relic of the pre-rebrand "CSC-ICE" naming.
+- **Breaking:** Removed `ingest_files_from_directory` from the library API; its directory-basename-as-default-prefix convention is superseded by the unified path-as-given identifier convention now used by `ingest-many`. Use `ingest_files` with caller-built `(identifier, path)` tuples for programmatic batch ingest.
+- CLI reports connection errors (unreachable host, refused connection) as a single-line message instead of a Python traceback.
+
+### Documentation
+- Noted that the API normalizes file identifiers to UTF-8 NFC. The client passes identifiers through unchanged, so the `identifier` field returned in metadata may differ from the value passed in (e.g., NFD input is returned in NFC form).
 
 ## 0.0.5 - 2026-04-02
 

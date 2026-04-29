@@ -30,7 +30,7 @@ Usage::
 Commands::
 
     ingest-one         Ingest (upload) a single file
-    ingest-many        Ingest (upload) all files from a directory
+    ingest-many        Ingest (upload) multiple files or a directory tree
     extract-one       Extract (download) a single file from the service
     extract-many      Extract (download) files from the service to a directory
     delete             Delete a single file and its metadata from the service
@@ -106,18 +106,22 @@ def build_parser() -> argparse.ArgumentParser:
 
     # ingest-many
     sub = subparsers.add_parser(
-        "ingest-many", help="Ingest (upload) all files from a directory")
-    sub.add_argument("local_dir", metavar="LOCAL_DIR")
+        "ingest-many",
+        help="Ingest (upload) one or more files and/or directory trees")
+    sub.add_argument(
+        "paths", metavar="PATH", nargs="+",
+        help="files and/or directories to ingest; identifiers are derived "
+             "from the paths as given (directories are walked recursively)")
     sub.add_argument(
         "--prefix", default=None,
-        help="identifier prefix (default: directory basename)")
+        help="prepend this prefix to every derived identifier")
     sub.add_argument(
         "--skip", action="store_true",
         help="skip files that already exist and match")
     sub.add_argument(
         "--force", action="store_true",
         help="overwrite files that already exist")
-    sub.set_defaults(func=_run_ingest_directory)
+    sub.set_defaults(func=_run_ingest_many)
 
     # extract-one
     sub = subparsers.add_parser(
@@ -291,6 +295,7 @@ def _run_status(config: Config, args: argparse.Namespace) -> None:
 
 def _run_ingest(config: Config, args: argparse.Namespace) -> None:
     """Ingest a single file."""
+    args.file_id = "/" + args.file_id.lstrip("/")
     logger.info("Ingesting file at local pathname '%s' with identifier "
                 "'%s' ...", args.local_path, args.file_id)
     result = tapest_client.ingest_file(
@@ -387,16 +392,37 @@ def _run_update_metadata(config: Config,
                 "identifier '%s'", args.file_id)
 
 
-def _run_ingest_directory(config: Config,
-                          args: argparse.Namespace) -> None:
-    """Ingest all files from a directory."""
-    logger.info("Ingesting files from directory '%s' ...", args.local_dir)
-    results = tapest_client.ingest_files_from_directory(
-        config, args.local_dir, skip=args.skip, force=args.force,
-        prefix=args.prefix)
+def _run_ingest_many(config: Config,
+                     args: argparse.Namespace) -> None:
+    """Ingest one or more files and/or directory trees.
+
+    Each CLI path becomes an identifier built from the path as given:
+    a file path becomes a single identifier, a directory path is walked
+    recursively and each contained file's identifier is the directory
+    path plus its relative location inside the tree. ``--prefix`` is
+    prepended to every derived identifier.
+    """
+    prefix = "/" + args.prefix.strip("/") if args.prefix else ""
+
+    files: list[tuple[str, str]] = []
+    for cli_path in args.paths:
+        p = Path(cli_path)
+        base = "/" + p.as_posix().strip("/")
+        if p.is_file():
+            files.append((prefix + base, str(p)))
+        elif p.is_dir():
+            for sub in sorted(p.rglob("*")):
+                if sub.is_file():
+                    rel = sub.relative_to(p).as_posix()
+                    files.append((prefix + base + "/" + rel, str(sub)))
+        else:
+            raise TapestClientError(f"Path does not exist: {cli_path}")
+
+    logger.info("Ingesting %d file(s) ...", len(files))
+    results = tapest_client.ingest_files(
+        config, files, skip=args.skip, force=args.force)
     _print_json(results)
-    logger.info("Successfully ingested %d file(s) from '%s'",
-                len(results), args.local_dir)
+    logger.info("Successfully ingested %d file(s)", len(results))
 
 
 def _run_extract_files(config: Config,

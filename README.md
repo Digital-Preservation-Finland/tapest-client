@@ -95,14 +95,21 @@ For per-command help, use `tapest-client <command> --help`.
 
 ```
 tapest-client ingest-one FILE_ID LOCAL_PATH [--storage NAME]
-tapest-client ingest-many LOCAL_DIR [--skip] [--force]
+tapest-client ingest-many PATH [PATH ...] [--prefix PFX] [--skip] [--force]
 ```
+
+`ingest-many` accepts any mix of file paths and directory paths. Each
+file's identifier is derived from the path as given; directories are
+walked recursively and each contained file's identifier extends the
+directory path with its relative location. `--prefix` is prepended to
+every derived identifier.
 
 Examples:
 
 ```
 tapest-client ingest-one /path/to/identifier /local/file.dat
-tapest-client ingest-many /local/dir --skip
+tapest-client ingest-many 2024/q1/*.dat 2024/q2/*.dat
+tapest-client ingest-many --prefix acme some_dir extra-file.dat --skip
 ```
 
 ### Extract (download)
