@@ -141,6 +141,31 @@ def test_headers_all_options(config_fx):
     assert headers["X-Custom"] == "val"
 
 
+def test_headers_account_name_overrides_config(config_fx):
+    """Per-call account_name takes precedence over config.storage_account_name."""
+    cfg = config_fx(storage_account_name="ida")
+    headers = _build_headers(cfg, account_name="kuvi")
+    assert headers["X-ICE-Account"] == "kuvi"
+
+
+def test_headers_account_name_when_config_unset(config_fx):
+    """Per-call account_name works even when config.storage_account_name is empty.
+
+    Covers the STORAGE_AGENT / cross-tenant case where the worker has
+    no fixed account in config and supplies the account per request.
+    """
+    cfg = config_fx(storage_account_name="")
+    headers = _build_headers(cfg, account_name="ida")
+    assert headers["X-ICE-Account"] == "ida"
+
+
+def test_headers_no_account_when_both_unset(config_fx):
+    """No X-ICE-Account header when neither config nor argument set it."""
+    cfg = config_fx(storage_account_name="")
+    headers = _build_headers(cfg)
+    assert "X-ICE-Account" not in headers
+
+
 # === _file_url / _metadata_url ===
 
 

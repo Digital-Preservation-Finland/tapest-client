@@ -74,11 +74,17 @@ class TapestClientError(Exception):
 
 
 def _build_headers(config: Config, storage_name: str | None = None,
-                   extra: dict[str, str] | None = None) -> dict[str, str]:
-    """Build common request headers from config."""
+                   extra: dict[str, str] | None = None,
+                   account_name: str | None = None) -> dict[str, str]:
+    """Build common request headers from config.
+
+    ``account_name`` overrides ``X-ICE-Account`` per request; falls
+    back to ``config.storage_account_name`` when unset.
+    """
     headers = {"Authorization": f"Bearer {config.token}"}
-    if config.storage_account_name:
-        headers["X-ICE-Account"] = config.storage_account_name
+    effective_account = account_name or config.storage_account_name
+    if effective_account:
+        headers["X-ICE-Account"] = effective_account
     if storage_name:
         headers["X-ICE-Storage"] = storage_name
     if extra:
@@ -170,6 +176,7 @@ def ingest_file(
     storage_name: str | None = None,
     checksum: str | None = None,
     raise_for_status: bool = False,
+    account_name: str | None = None,
 ) -> dict:
     """Ingest a local file and return its metadata.
 
@@ -188,6 +195,8 @@ def ingest_file(
         can be given during this function's call.
     :param raise_for_status: Boolean whether requests-call response should
         try to raise an exception.
+    :param account_name: Per-call override for ``X-ICE-Account``.
+        Falls back to ``config.storage_account_name`` if unset.
     """
     path = Path(local_file_pathname)
     stat = path.stat()
@@ -210,6 +219,7 @@ def ingest_file(
             "X-ICE-Created": created,
             "X-ICE-Modified": modified,
         },
+        account_name=account_name,
     )
     verify_ssl = _verify_param(config)
 
@@ -233,10 +243,16 @@ def ingest_file(
 
 
 def recache_file(config: Config, identifier: str, local_file_pathname: str,
-                 storage_name: str | None = None) -> dict:
-    """Re-upload a cached file, verifying it matches."""
+                 storage_name: str | None = None,
+                 account_name: str | None = None) -> dict:
+    """Re-upload a cached file, verifying it matches.
+
+    See :func:`ingest_file` for the semantics of ``account_name``.
+    """
     path = Path(local_file_pathname)
-    file_metadata = retrieve_file_metadata(config, identifier)
+    file_metadata = retrieve_file_metadata(
+        config, identifier, account_name=account_name
+    )
 
     stat = path.stat()
     if stat.st_size != file_metadata["size"]:
@@ -258,7 +274,7 @@ def recache_file(config: Config, identifier: str, local_file_pathname: str,
         "X-ICE-Created": file_metadata["created"],
         "X-ICE-Modified": file_metadata["modified"],
         "X-ICE-Recache": "true",
-    })
+    }, account_name=account_name)
     verify_ssl = _verify_param(config)
 
     def do_request():
@@ -280,25 +296,32 @@ def recache_file(config: Config, identifier: str, local_file_pathname: str,
 
 def extract_file(config: Config, identifier: str, local_file_pathname: str,
                  next_identifier: str | None = None,
-                 storage_name: str | None = None) -> dict:
-    """Extract a file by identifier to a local path."""
+                 storage_name: str | None = None,
+                 account_name: str | None = None) -> dict:
+    """Extract a file by identifier to a local path.
+
+    See :func:`ingest_file` for the semantics of ``account_name``.
+    """
     file_metadata = retrieve_file_metadata(
-        config, identifier, storage_name
+        config, identifier, storage_name, account_name=account_name
     )
     return extract_file_with_metadata(
         config, file_metadata, local_file_pathname,
-        next_identifier, storage_name
+        next_identifier, storage_name, account_name=account_name
     )
 
 
 def extract_file_with_metadata(config: Config, file_metadata: dict,
                                local_file_pathname: str,
                                next_identifier: str | None = None,
-                               storage_name: str | None = None) -> dict:
+                               storage_name: str | None = None,
+                               account_name: str | None = None) -> dict:
     """Extract a file using provided metadata to a local path.
 
     Uses its own retry loop because the response body must be written to
     disk and verified after each attempt.
+
+    See :func:`ingest_file` for the semantics of ``account_name``.
     """
     path = Path(local_file_pathname)
     if path.exists():
@@ -309,7 +332,8 @@ def extract_file_with_metadata(config: Config, file_metadata: dict,
     identifier = file_metadata["identifier"]
     url = _file_url(config, identifier)
     headers = _build_headers(
-        config, storage_name or file_metadata.get("storage")
+        config, storage_name or file_metadata.get("storage"),
+        account_name=account_name,
     )
     if next_identifier:
         headers["X-ICE-Next-File"] = urllib.parse.quote(
@@ -378,10 +402,14 @@ def extract_file_with_metadata(config: Config, file_metadata: dict,
 
 
 def delete_file(config: Config, identifier: str,
-                storage_name: str | None = None) -> None:
-    """Delete a file by identifier."""
+                storage_name: str | None = None,
+                account_name: str | None = None) -> None:
+    """Delete a file by identifier.
+
+    See :func:`ingest_file` for the semantics of ``account_name``.
+    """
     url = _file_url(config, identifier)
-    headers = _build_headers(config, storage_name)
+    headers = _build_headers(config, storage_name, account_name=account_name)
     verify_ssl = _verify_param(config)
     response = requests.delete(url, headers=headers, verify=verify_ssl)
     if response.status_code == 204:
@@ -393,10 +421,14 @@ def delete_file(config: Config, identifier: str,
 
 
 def retrieve_file_metadata(config: Config, identifier: str,
-                           storage_name: str | None = None) -> dict:
-    """Retrieve metadata for a single file."""
+                           storage_name: str | None = None,
+                           account_name: str | None = None) -> dict:
+    """Retrieve metadata for a single file.
+
+    See :func:`ingest_file` for the semantics of ``account_name``.
+    """
     url = _metadata_url(config, identifier)
-    headers = _build_headers(config, storage_name)
+    headers = _build_headers(config, storage_name, account_name=account_name)
     verify_ssl = _verify_param(config)
     response = requests.get(url, headers=headers, verify=verify_ssl)
     if response.status_code == 200:
@@ -409,10 +441,14 @@ def retrieve_file_metadata(config: Config, identifier: str,
 
 def update_file_metadata(config: Config, identifier: str,
                          file_metadata_update: dict,
-                         storage_name: str | None = None) -> dict:
-    """Update metadata for a single file."""
+                         storage_name: str | None = None,
+                         account_name: str | None = None) -> dict:
+    """Update metadata for a single file.
+
+    See :func:`ingest_file` for the semantics of ``account_name``.
+    """
     url = _metadata_url(config, identifier)
-    headers = _build_headers(config, storage_name)
+    headers = _build_headers(config, storage_name, account_name=account_name)
     verify_ssl = _verify_param(config)
     response = requests.patch(
         url, json=file_metadata_update, headers=headers, verify=verify_ssl
@@ -426,10 +462,14 @@ def update_file_metadata(config: Config, identifier: str,
 
 
 def retrieve_metadata(config: Config, query: dict | None = None,
-                      storage_name: str | None = None) -> dict:
-    """Retrieve metadata matching query parameters."""
+                      storage_name: str | None = None,
+                      account_name: str | None = None) -> dict:
+    """Retrieve metadata matching query parameters.
+
+    See :func:`ingest_file` for the semantics of ``account_name``.
+    """
     url = _metadata_url(config)
-    headers = _build_headers(config, storage_name)
+    headers = _build_headers(config, storage_name, account_name=account_name)
     verify_ssl = _verify_param(config)
     response = requests.post(
         url, json=query or {}, headers=headers, verify=verify_ssl
@@ -462,6 +502,7 @@ def ingest_files(
     files: list[tuple[str, str]],
     skip: bool = False,
     force: bool = False,
+    account_name: str | None = None,
 ) -> list[dict]:
     """Ingest a list of files with explicit identifiers.
 
@@ -470,6 +511,8 @@ def ingest_files(
     ``skip`` skips matching files; ``force`` replaces differing files.
     The checksum is computed once per file and reused for both the
     conflict comparison and any retry PUT.
+
+    See :func:`ingest_file` for the semantics of ``account_name``.
     """
     ingested = []
     for identifier, local_path in files:
@@ -482,6 +525,7 @@ def ingest_files(
                     local_file_pathname=local_path,
                     checksum=checksum,
                     raise_for_status=True,
+                    account_name=account_name,
                 )
             )
             continue
@@ -492,18 +536,21 @@ def ingest_files(
                     f"{err.response.status_code} {err.response.text}"
                 ) from err
 
-        file_metadata = retrieve_file_metadata(config, identifier)
+        file_metadata = retrieve_file_metadata(
+            config, identifier, account_name=account_name
+        )
         same = checksum == file_metadata["checksum"]
         if skip and same:
             continue
         if force and not same:
-            delete_file(config, identifier)
+            delete_file(config, identifier, account_name=account_name)
             ingested.append(
                 ingest_file(
                     config=config,
                     identifier=identifier,
                     local_file_pathname=local_path,
                     checksum=checksum,
+                    account_name=account_name,
                 )
             )
             continue
@@ -533,8 +580,13 @@ def _conflict_action(skip: bool, force: bool, same: bool) -> _ConflictAction:
 def extract_files_to_directory(config: Config, metadata: list[dict],
                                local_directory_pathname: str,
                                skip: bool = False, force: bool = False,
-                               storage_name: str | None = None) -> list[dict]:
-    """Extract files described in metadata list to a directory tree."""
+                               storage_name: str | None = None,
+                               account_name: str | None = None
+                               ) -> list[dict]:
+    """Extract files described in metadata list to a directory tree.
+
+    See :func:`ingest_file` for the semantics of ``account_name``.
+    """
     root = Path(local_directory_pathname)
     if not root.is_dir():
         raise TapestClientError(
@@ -551,7 +603,8 @@ def extract_files_to_directory(config: Config, metadata: list[dict],
 
         if not path.exists():
             extracted.append(extract_file_with_metadata(
-                config, file_metadata, str(path), next_id, storage_name
+                config, file_metadata, str(path), next_id, storage_name,
+                account_name=account_name,
             ))
             continue
         if not (skip or force):
@@ -566,7 +619,8 @@ def extract_files_to_directory(config: Config, metadata: list[dict],
         if action is _ConflictAction.REPLACE:
             path.unlink()
             extracted.append(extract_file_with_metadata(
-                config, file_metadata, str(path), next_id, storage_name
+                config, file_metadata, str(path), next_id, storage_name,
+                account_name=account_name,
             ))
             continue
         raise TapestClientError(f"File already exists at {path}")
