@@ -669,10 +669,11 @@ def ingest_files(
     """Ingest a list of files with explicit identifiers.
 
     ``files`` is a list of ``(identifier, local_pathname)`` tuples.
-    By default, an identifier that already exists on the server raises;
-    ``skip`` skips matching files; ``force`` replaces differing files.
-    The checksum is computed once per file and reused for both the
-    conflict comparison and any retry PUT.
+    By default, an identifier that already exists on the server raises.
+    ``skip`` and ``force`` both treat a matching checksum as a silent
+    no-op; ``force`` additionally replaces files whose content differs
+    (delete + re-ingest). The checksum is computed once per file and
+    reused for both the conflict comparison and any retry PUT.
 
     See :func:`ingest_file` for the semantics of ``account_name``.
     """
@@ -702,9 +703,10 @@ def ingest_files(
             config, identifier, account_name=account_name
         )
         same = checksum == file_metadata["checksum"]
-        if skip and same:
+        action = _conflict_action(skip, force, same)
+        if action is _ConflictAction.SKIP:
             continue
-        if force and not same:
+        if action is _ConflictAction.REPLACE:
             delete_file(config, identifier, account_name=account_name)
             ingested.append(
                 ingest_file(
@@ -731,8 +733,13 @@ class _ConflictAction(Enum):
 
 
 def _conflict_action(skip: bool, force: bool, same: bool) -> _ConflictAction:
-    """Resolve an existing-file conflict."""
-    if skip and same:
+    """Resolve an existing-file conflict.
+
+    A matching checksum is a silent no-op under either ``skip`` or
+    ``force``; ``force`` additionally replaces files whose content
+    differs. Differing content under ``skip`` alone is an error.
+    """
+    if same and (skip or force):
         return _ConflictAction.SKIP
     if force and not same:
         return _ConflictAction.REPLACE

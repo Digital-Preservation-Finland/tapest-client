@@ -72,8 +72,7 @@ def test_checksum_known_content(tmp_path):
     path = tmp_path / "test.bin"
     path.write_bytes(b"hello world")
     expected = (
-        "sha256:b94d27b9934d3e08a52e52d7da7dab"
-        "fac484efe37a5380ee9088f7ace2efcde9"
+        "sha256:b94d27b9934d3e08a52e52d7da7dab" "fac484efe37a5380ee9088f7ace2efcde9"
     )
     assert generate_checksum(str(path)) == expected
 
@@ -83,8 +82,7 @@ def test_checksum_empty_file(tmp_path):
     path = tmp_path / "empty"
     path.write_bytes(b"")
     expected = (
-        "sha256:e3b0c44298fc1c149afbf4c8996fb924"
-        "27ae41e4649b934ca495991b7852b855"
+        "sha256:e3b0c44298fc1c149afbf4c8996fb924" "27ae41e4649b934ca495991b7852b855"
     )
     assert generate_checksum(str(path)) == expected
 
@@ -293,9 +291,7 @@ def test_file_special_characters(special_chars, config_fx):
 def test_retry_immediate_success(config_fx):
     """Non-202 response is returned immediately."""
     resp = mock_response(200)
-    result = _request_with_retry(
-        lambda: resp, config_fx(max_retry_attempts=3), "test"
-    )
+    result = _request_with_retry(lambda: resp, config_fx(max_retry_attempts=3), "test")
     assert result.status_code == 200
 
 
@@ -315,20 +311,14 @@ def test_retry_202_then_success(config_fx):
 def test_retry_max_attempts(config_fx):
     """Raises after exhausting all retry attempts."""
     resp = mock_response(202, headers={"Retry-After": "0"})
-    with pytest.raises(
-        TapestClientError, match="file unavailable after 2 attempts"
-    ):
-        _request_with_retry(
-            lambda: resp, config_fx(max_retry_attempts=2), "test"
-        )
+    with pytest.raises(TapestClientError, match="file unavailable after 2 attempts"):
+        _request_with_retry(lambda: resp, config_fx(max_retry_attempts=2), "test")
 
 
 def test_retry_non_202_error_returned(config_fx):
     """Non-202 errors are returned to caller, not raised."""
     resp = mock_response(500)
-    result = _request_with_retry(
-        lambda: resp, config_fx(max_retry_attempts=3), "test"
-    )
+    result = _request_with_retry(lambda: resp, config_fx(max_retry_attempts=3), "test")
     assert result.status_code == 500
 
 

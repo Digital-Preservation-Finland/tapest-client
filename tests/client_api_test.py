@@ -30,8 +30,7 @@ SAMPLE_METADATA = {
     "identifier": "/pkg/file.dat",
     "size": 11,
     "checksum": (
-        "sha256:b94d27b9934d3e08a52e52d7da7dab"
-        "fac484efe37a5380ee9088f7ace2efcde9"
+        "sha256:b94d27b9934d3e08a52e52d7da7dab" "fac484efe37a5380ee9088f7ace2efcde9"
     ),
     "created": "2025-01-01T00:00:00Z",
     "modified": "2025-06-01T12:00:00Z",
@@ -51,9 +50,7 @@ def test_ingest_success(tmp_path, config_fx, requests_fx):
     """Successful ingest returns metadata from API."""
     path = tmp_path / "file.dat"
     path.write_bytes(b"hello world")
-    requests_fx.responses["put"] = mock_response(
-        201, json_data=SAMPLE_METADATA
-    )
+    requests_fx.responses["put"] = mock_response(201, json_data=SAMPLE_METADATA)
     result = ingest_file(config_fx(), "/pkg/file.dat", str(path))
     assert result == SAMPLE_METADATA
 
@@ -71,9 +68,7 @@ def test_ingest_storage_name_header(tmp_path, config_fx, requests_fx):
     """Storage name is sent as X-ICE-Storage header."""
     path = tmp_path / "file.dat"
     path.write_bytes(b"data")
-    requests_fx.responses["put"] = mock_response(
-        201, json_data=SAMPLE_METADATA
-    )
+    requests_fx.responses["put"] = mock_response(201, json_data=SAMPLE_METADATA)
     ingest_file(config_fx(), "/id", str(path), storage_name="tape-01")
     assert requests_fx.calls["put"]["headers"]["X-ICE-Storage"] == "tape-01"
 
@@ -85,12 +80,8 @@ def test_recache_success(tmp_path, config_fx, requests_fx):
     """Successful recache verifies file and returns metadata."""
     path = tmp_path / "file.dat"
     path.write_bytes(b"hello world")
-    requests_fx.responses["get"] = mock_response(
-        200, json_data=SAMPLE_METADATA
-    )
-    requests_fx.responses["put"] = mock_response(
-        201, json_data=SAMPLE_METADATA
-    )
+    requests_fx.responses["get"] = mock_response(200, json_data=SAMPLE_METADATA)
+    requests_fx.responses["put"] = mock_response(201, json_data=SAMPLE_METADATA)
     result = recache_file(config_fx(), "/pkg/file.dat", str(path))
     assert result == SAMPLE_METADATA
 
@@ -136,9 +127,7 @@ def test_extract_with_metadata_success(tmp_path, config_fx, requests_fx):
     """Successful extract writes file and returns metadata."""
     dest = tmp_path / "out.dat"
     requests_fx.responses["get"] = _download_response()
-    result = extract_file_with_metadata(
-        config_fx(), SAMPLE_METADATA, str(dest)
-    )
+    result = extract_file_with_metadata(config_fx(), SAMPLE_METADATA, str(dest))
     assert result == SAMPLE_METADATA
     assert dest.read_bytes() == b"hello world"
 
@@ -159,15 +148,11 @@ def test_extract_with_metadata_size_mismatch_cleans_up(
     meta = {**SAMPLE_METADATA, "size": 99999}
     requests_fx.responses["get"] = _download_response()
     with pytest.raises(TapestClientError, match="size"):
-        extract_file_with_metadata(
-            config_fx(cleanup_on_fail=True), meta, str(dest)
-        )
+        extract_file_with_metadata(config_fx(cleanup_on_fail=True), meta, str(dest))
     assert not dest.exists()
 
 
-def test_extract_with_metadata_checksum_mismatch(
-    tmp_path, config_fx, requests_fx
-):
+def test_extract_with_metadata_checksum_mismatch(tmp_path, config_fx, requests_fx):
     """Raises if downloaded file checksum differs from metadata."""
     dest = tmp_path / "out.dat"
     meta = {**SAMPLE_METADATA, "checksum": "sha256:bad"}
@@ -183,25 +168,19 @@ def test_extract_with_metadata_retry_202(tmp_path, config_fx, requests_fx):
         mock_response(202, headers={"Retry-After": "0"}),
         _download_response(),
     ]
-    result = extract_file_with_metadata(
-        config_fx(), SAMPLE_METADATA, str(dest)
-    )
+    result = extract_file_with_metadata(config_fx(), SAMPLE_METADATA, str(dest))
     assert result == SAMPLE_METADATA
 
 
 def test_extract_with_metadata_max_attempts(tmp_path, config_fx, requests_fx):
     """Raises after exhausting all retry attempts on repeated 202."""
     dest = tmp_path / "out.dat"
-    requests_fx.responses["get"] = mock_response(
-        202, headers={"Retry-After": "0"}
-    )
+    requests_fx.responses["get"] = mock_response(202, headers={"Retry-After": "0"})
     with pytest.raises(TapestClientError, match="file unavailable after"):
         extract_file_with_metadata(config_fx(), SAMPLE_METADATA, str(dest))
 
 
-def test_extract_with_metadata_http_error_cleans_up(
-    tmp_path, config_fx, requests_fx
-):
+def test_extract_with_metadata_http_error_cleans_up(tmp_path, config_fx, requests_fx):
     """HTTP error removes partial file when cleanup_on_fail is set."""
     dest = tmp_path / "out.dat"
     requests_fx.responses["get"] = mock_response(500, text="Error")
@@ -211,9 +190,7 @@ def test_extract_with_metadata_http_error_cleans_up(
         )
 
 
-def test_extract_with_metadata_next_identifier(
-    tmp_path, config_fx, requests_fx
-):
+def test_extract_with_metadata_next_identifier(tmp_path, config_fx, requests_fx):
     """next_identifier is sent as X-ICE-Next-File header for prefetch."""
     dest = tmp_path / "out.dat"
     requests_fx.responses["get"] = _download_response()
@@ -223,9 +200,7 @@ def test_extract_with_metadata_next_identifier(
     assert "X-ICE-Next-File" in requests_fx.calls["get"]["headers"]
 
 
-def test_extract_with_metadata_creates_parent_dirs(
-    tmp_path, config_fx, requests_fx
-):
+def test_extract_with_metadata_creates_parent_dirs(tmp_path, config_fx, requests_fx):
     """Missing parent directories are created automatically."""
     dest = tmp_path / "sub" / "dir" / "out.dat"
     requests_fx.responses["get"] = _download_response()
@@ -244,29 +219,21 @@ def test_delete_success(config_fx, requests_fx):
 
 def test_retrieve_file_metadata_success(config_fx, requests_fx):
     """Successful retrieval returns metadata dict."""
-    requests_fx.responses["get"] = mock_response(
-        200, json_data=SAMPLE_METADATA
-    )
-    assert (
-        retrieve_file_metadata(config_fx(), "/pkg/file.dat") == SAMPLE_METADATA
-    )
+    requests_fx.responses["get"] = mock_response(200, json_data=SAMPLE_METADATA)
+    assert retrieve_file_metadata(config_fx(), "/pkg/file.dat") == SAMPLE_METADATA
 
 
 def test_update_file_metadata_success(config_fx, requests_fx):
     """Successful update returns updated metadata."""
     updated = {**SAMPLE_METADATA, "custom": "value"}
     requests_fx.responses["patch"] = mock_response(200, json_data=updated)
-    result = update_file_metadata(
-        config_fx(), "/pkg/file.dat", {"custom": "value"}
-    )
+    result = update_file_metadata(config_fx(), "/pkg/file.dat", {"custom": "value"})
     assert result["custom"] == "value"
 
 
 def test_retrieve_metadata_success(config_fx, requests_fx):
     """Successful query returns metadata list."""
-    requests_fx.responses["post"] = mock_response(
-        200, json_data=[SAMPLE_METADATA]
-    )
+    requests_fx.responses["post"] = mock_response(200, json_data=[SAMPLE_METADATA])
     result = retrieve_metadata(config_fx(), query={"status": "stored"})
     assert result == [SAMPLE_METADATA]
 
@@ -280,9 +247,7 @@ def test_retrieve_metadata_default_query(config_fx, requests_fx):
 
 def test_retrieve_status_success(config_fx, requests_fx):
     """Successful status check returns status dict."""
-    requests_fx.responses["get"] = mock_response(
-        200, json_data={"status": "ok"}
-    )
+    requests_fx.responses["get"] = mock_response(200, json_data={"status": "ok"})
     assert retrieve_status(config_fx()) == {"status": "ok"}
 
 
@@ -297,9 +262,7 @@ def test_ingest_files_new(tmp_path, config_fx):
     f2.write_bytes(b"bbb")
     config = config_fx()
     with requests_mock.Mocker() as mock:
-        mock.put(
-            url=f"{config.host}/file", status_code=201, json=SAMPLE_METADATA
-        )
+        mock.put(url=f"{config.host}/file", status_code=201, json=SAMPLE_METADATA)
         result = ingest_files(
             config, [("/pkg/a.dat", str(f1)), ("/pkg/b.dat", str(f2))]
         )
@@ -353,6 +316,20 @@ def test_ingest_files_force_replaces(tmp_path, config_fx):
         assert mock.call_count == 4
 
 
+def test_ingest_files_force_skips_matching(tmp_path, config_fx):
+    """force=True silently skips files whose checksum matches the server."""
+    path = tmp_path / "a.dat"
+    path.write_bytes(b"hello world")
+    checksum = generate_checksum(path)
+    meta = {**SAMPLE_METADATA, "size": 11, "checksum": checksum}
+    config = config_fx()
+    with requests_mock.Mocker() as mock:
+        mock.put(url=f"{config.host}/file", status_code=409)
+        mock.get(url=f"{config.host}/metadata", json=meta)
+        result = ingest_files(config, [("/pkg/a.dat", str(path))], force=True)
+    assert result == []
+
+
 # === extract_files_to_directory ===
 
 
@@ -383,9 +360,7 @@ def test_extract_directory_skip_existing(tmp_path, config_fx):
         "size": 11,
         "checksum": checksum,
     }
-    result = extract_files_to_directory(
-        config_fx(), [meta], str(tmp_path), skip=True
-    )
+    result = extract_files_to_directory(config_fx(), [meta], str(tmp_path), skip=True)
     assert len(result) == 0
 
 
@@ -396,9 +371,7 @@ def test_extract_directory_force_replaces(tmp_path, config_fx, requests_fx):
     path.write_bytes(b"old content")
     meta = {**SAMPLE_METADATA, "identifier": "/pkg/file.dat"}
     requests_fx.responses["get"] = _download_response()
-    result = extract_files_to_directory(
-        config_fx(), [meta], str(tmp_path), force=True
-    )
+    result = extract_files_to_directory(config_fx(), [meta], str(tmp_path), force=True)
     assert len(result) == 1
 
 
@@ -421,8 +394,8 @@ def test_extract_directory_next_identifier(tmp_path, config_fx, requests_fx):
     assert "X-ICE-Next-File" in requests_fx.all_calls["get"][0]["headers"]
 
 
-def test_extract_directory_force_same_raises(tmp_path, config_fx):
-    """force=True with matching file raises rather than silently skipping."""
+def test_extract_directory_force_skips_matching(tmp_path, config_fx):
+    """force=True silently skips local files whose checksum matches."""
     path = tmp_path / "pkg" / "file.dat"
     path.parent.mkdir(parents=True)
     path.write_bytes(b"hello world")
@@ -433,10 +406,8 @@ def test_extract_directory_force_same_raises(tmp_path, config_fx):
         "size": 11,
         "checksum": checksum,
     }
-    with pytest.raises(TapestClientError, match="already exists"):
-        extract_files_to_directory(
-            config_fx(), [meta], str(tmp_path), force=True
-        )
+    result = extract_files_to_directory(config_fx(), [meta], str(tmp_path), force=True)
+    assert result == []
 
 
 # === ca_cert_path ===

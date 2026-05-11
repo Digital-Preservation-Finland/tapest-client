@@ -318,7 +318,9 @@ def _load_config(args: argparse.Namespace) -> Config:
             f"{config_file} or TAPEST_CLIENT_TOKEN env var"
         )
     logger.debug(
-        "Config: host=%s account=%s", config.host, config.storage_account_name
+        "Config: host=%s account=%s",
+        config.host,
+        config.storage_account_name,
     )
     return config
 
@@ -553,7 +555,9 @@ def _run_extract_files(config: Config, args: argparse.Namespace) -> None:
         return
 
     logger.info(
-        "Extracting %d file(s) to '%s' ...", len(metadata_list), args.local_dir
+        "Extracting %d file(s) to '%s' ...",
+        len(metadata_list),
+        args.local_dir,
     )
     results = tapest_client.extract_files_to_directory(
         config,

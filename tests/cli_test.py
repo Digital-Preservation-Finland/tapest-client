@@ -129,9 +129,7 @@ def test_ingest_many_parses_options():
 
 def test_extract_with_next_id():
     """extract-one accepts optional next file identifier."""
-    args = build_parser().parse_args(
-        ["extract-one", "/id", "/path", "/next-id"]
-    )
+    args = build_parser().parse_args(["extract-one", "/id", "/path", "/next-id"])
     assert args.next_file_id == "/next-id"
 
 
@@ -150,9 +148,7 @@ def test_ingest_calls_library(config_fx, cli_fx, capsys):
     cli_fx("ingest_file", return_value={"identifier": "/id", "size": 100})
     args = SimpleNamespace(file_id="/id", local_path="/path", storage=None)
     _run_ingest(config_fx(), args)
-    assert cli_fx.calls["ingest_file"] == [
-        (("/id", "/path"), {"storage_name": None})
-    ]
+    assert cli_fx.calls["ingest_file"] == [(("/id", "/path"), {"storage_name": None})]
     assert json.loads(capsys.readouterr().out)["identifier"] == "/id"
 
 
@@ -161,9 +157,7 @@ def test_ingest_normalizes_leading_slash(config_fx, cli_fx):
     cli_fx("ingest_file", return_value={"identifier": "/id"})
     args = SimpleNamespace(file_id="id", local_path="/path", storage=None)
     _run_ingest(config_fx(), args)
-    assert cli_fx.calls["ingest_file"] == [
-        (("/id", "/path"), {"storage_name": None})
-    ]
+    assert cli_fx.calls["ingest_file"] == [(("/id", "/path"), {"storage_name": None})]
 
 
 def test_extract_calls_library(config_fx, cli_fx):
@@ -274,9 +268,7 @@ def test_ingest_many_directory(tmp_path, monkeypatch, config_fx, cli_fx):
     (d / "sub").mkdir()
     (d / "sub" / "b.dat").write_bytes(b"b")
     cli_fx("ingest_files", return_value=[])
-    args = SimpleNamespace(
-        paths=["acme"], skip=False, force=False, prefix=None
-    )
+    args = SimpleNamespace(paths=["acme"], skip=False, force=False, prefix=None)
     _run_ingest_many(config_fx(), args)
     assert cli_fx.calls["ingest_files"] == [
         (
@@ -363,9 +355,7 @@ def test_ingest_many_prefix_normalization(
         paths=["a.dat"], skip=False, force=False, prefix=prefix_input
     )
     _run_ingest_many(config_fx(), args)
-    assert cli_fx.calls["ingest_files"][0][0][0] == [
-        ("/acme/2024/a.dat", "a.dat")
-    ]
+    assert cli_fx.calls["ingest_files"][0][0][0] == [("/acme/2024/a.dat", "a.dat")]
 
 
 def test_extract_files(config_fx, cli_fx, capsys):
@@ -440,9 +430,7 @@ def test_load_config_host_override(tmp_path):
     """--host CLI flag overrides host from config file."""
     conf = tmp_path / "client.conf"
     conf.write_text('{"host": "https://h", "token": "tok"}')
-    args = SimpleNamespace(
-        config=str(conf), host="https://override", ca_cert=None
-    )
+    args = SimpleNamespace(config=str(conf), host="https://override", ca_cert=None)
     assert _load_config(args).host == "https://override"
 
 

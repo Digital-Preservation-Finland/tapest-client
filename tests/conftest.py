@@ -55,10 +55,7 @@ _CONFIG_PERMUTATIONS = [
 
 @pytest.fixture(
     params=_CONFIG_PERMUTATIONS,
-    ids=[
-        " ".join(f"{k}={v}" for k, v in p.items())
-        for p in _CONFIG_PERMUTATIONS
-    ],
+    ids=[" ".join(f"{k}={v}" for k, v in p.items()) for p in _CONFIG_PERMUTATIONS],
 )
 def config_fx(request):
     """Create a Config based on CLIENT_CONFIG_DEFAULT with optional overrides.
@@ -80,9 +77,7 @@ def config_fx(request):
     return _make
 
 
-def mock_response(
-    status_code, json_data=None, text="", headers=None, content=None
-):
+def mock_response(status_code, json_data=None, text="", headers=None, content=None):
     """Build a fake requests.Response with the given attributes.
 
     Pass *content* (bytes) for download responses that need
@@ -144,9 +139,7 @@ def requests_fx(monkeypatch):
             f"tapest_client.client.requests.{method}", _make_fake(method)
         )
 
-    return types.SimpleNamespace(
-        calls=calls, all_calls=all_calls, responses=responses
-    )
+    return types.SimpleNamespace(calls=calls, all_calls=all_calls, responses=responses)
 
 
 @pytest.fixture
@@ -179,9 +172,7 @@ def cli_fx(monkeypatch):
                     raise return_value
                 return return_value
 
-            monkeypatch.setattr(
-                f"tapest_client.cli.tapest_client.{func_name}", _fake
-            )
+            monkeypatch.setattr(f"tapest_client.cli.tapest_client.{func_name}", _fake)
 
     return _Fixture()
 
