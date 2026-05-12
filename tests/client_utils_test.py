@@ -5,6 +5,7 @@ construction, retry logic, and the TapestClientError exception.
 """
 
 import pytest
+import urllib.parse
 
 from tapest_client.client import (
     TapestClientError,
@@ -190,6 +191,56 @@ def test_metadata_url_without_identifier(config_fx):
     """Builds bare /metadata URL when no identifier given."""
     cfg = config_fx()
     assert _metadata_url(cfg) == f"{cfg.host}/metadata"
+
+
+# === URL encoding for special characters ===
+
+@pytest.mark.parametrize(
+    "special_chars",
+    [
+        "with!@#$%^&*()chars",
+        "/path/with space<tab>\t<newline>\nchars.dat",
+        "/path/with\"single'double\\backslash[brackets]{braces}.dat",
+        "/ÄäÖöÅåÍíÜüÆæ.dat",
+        "/path/файл_Ελληνικά_عربي_中文_日本語_file.dat",
+        "/path/with spaces in filename.dat",
+        "/path/with\nnewline\rcarriage.dat",
+        "/path/with\u00a0nbsp\u2003em_space.dat",
+        "/path/with   multiple   spaces.dat",
+        "/path/with%percent%20signs.dat",
+        "/path/file&with&ampersands.dat",
+        "/path/key=value=file.dat",
+        "/path/pipe|tilde~chars.dat",
+        "/path/math_∑_∫_±_≠.dat",
+    ],
+    ids=[
+        "Special characters",
+        "Tab and newlines",
+        "Extended special characters",
+        "Nordic etc. alphabets",
+        "Greek, Cyrillic, Japanese, Chinese, Arabic alphabets",
+        "Spaces",
+        "Newlines",
+        "Unicode spaces",
+        "Multiple continuous spaces",
+        "Percent sign",
+        "Ampersand",
+        "Equal sign",
+        "Pipe and tilde",
+        "Mathematical characters",
+    ],
+)
+def test_file_special_characters(special_chars, config_fx):
+    """Special characters are correctly URL-encoded in /file endpoint."""
+    cfg = config_fx()
+    identifier = special_chars
+    url = _file_url(cfg, identifier)
+    # Verify URL is properly formed
+    assert url.startswith(f"{cfg.host}/file?identifier=")
+    # Extract encoded identifier from URL
+    encoded = url.split("identifier=")[1]
+    # Verify it can be decoded back to original
+    assert urllib.parse.unquote(encoded) == identifier
 
 
 # === _request_with_retry ===
