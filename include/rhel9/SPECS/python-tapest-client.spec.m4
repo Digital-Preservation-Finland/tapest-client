@@ -27,6 +27,8 @@ BuildRequires:  %{py3_dist pytest}
 BuildRequires:  %{py3_dist requests-mock}
 
 Requires:       python3-certifi
+Requires:       python3-platformdirs
+Requires:       python3-tuspy
 
 Obsoletes:      python3-tapest-ice-api-client < %{version}
 Provides:       python3-tapest-ice-api-client = %{version}-%{release}

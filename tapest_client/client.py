@@ -54,12 +54,25 @@ from pathlib import Path
 
 from collections.abc import Callable
 
+from platformdirs import user_state_path
 import requests
 from requests.exceptions import HTTPError
+from tusclient import client as tus_client
+from tusclient.storage import filestorage
 
 from tapest_client.config import Config
 
 TIMESTAMP_FORMAT = "%Y-%m-%dT%H:%M:%SZ"
+_CHUNK_SIZE_UNITS = {
+    "B": 0,
+    "KiB": 1,
+    "MiB": 2,
+    "GiB": 3,
+    "TiB": 4,
+    "PiB": 5,
+    "EiB": 6,
+    "ZiB": 7,
+}
 
 
 class TapestClientError(Exception):
@@ -97,8 +110,7 @@ def _build_headers(
 
 def _file_url(config: Config, identifier: str) -> str:
     """Build /file endpoint URL."""
-    encoded = urllib.parse.quote(
-        _normalize_identifier(identifier), safe="")
+    encoded = urllib.parse.quote(_normalize_identifier(identifier), safe="")
     return f"{config.host}/file?identifier={encoded}"
 
 
@@ -106,7 +118,8 @@ def _metadata_url(config: Config, identifier: str | None = None) -> str:
     """Build /metadata endpoint URL."""
     if identifier:
         encoded = urllib.parse.quote(
-            _normalize_identifier(identifier), safe="")
+            _normalize_identifier(identifier), safe=""
+        )
         return f"{config.host}/metadata?identifier={encoded}"
     return f"{config.host}/metadata"
 
@@ -180,7 +193,97 @@ def cleanup_file(config: Config, local_file_pathname: str) -> None:
             pass
 
 
+def parse_chunk_size(chunk_size: str) -> int:
+    """Parses human-readable chunk size into bytes representation of integers.
+
+    :param chunk_size: Chunk size to parse, such as 16 MiB
+    :return: Chunk size in bytes, in int representation
+    :raises TapestClientError: If the chunk_size provided is problematic.
+    """
+    try:
+        size, chunk_unit = chunk_size.split()
+        chunk_size_in_bytes = float(size) * (
+            1024 ** _CHUNK_SIZE_UNITS[chunk_unit]
+        )
+    except (ValueError, KeyError) as exc:
+        raise TapestClientError(
+            f"Could not parse chunk size from [{chunk_size}]."
+        ) from exc
+    if chunk_size_in_bytes <= 0:
+        raise TapestClientError(
+            f"Chunk size must be positive, got [{chunk_size}]."
+        )
+    return int(chunk_size_in_bytes)
+
+
 # === Core Operation Functions ===
+
+
+def tus_ingest_file(
+    config: Config,
+    identifier: str,
+    path: str,
+    storage_name: str | None = None,
+    checksum: str | None = None,
+    account_name: str | None = None,
+    chunk_size: str = "16 MiB",
+):
+    """Ingest a local file via TUS endpoint.
+
+    :param config: Config instance.
+    :param identifier: File identifier.
+    :param path: local file URI.
+    :param checksum: Pre-given checksum so that checksum calculation
+        can be given during this function's call.
+    :param storage_name: Storage name to upload to.
+    :param account_name: Per-call override for ``X-ICE-Account``.
+        Falls back to ``config.storage_account_name`` if unset.
+    :param chunk_size: Size of chunks to send as part of TUS upload.
+    """
+    chunk_size_in_bytes = parse_chunk_size(chunk_size=chunk_size)
+    tus_client_obj = tus_client.TusClient(url=f"{config.host}/tus")
+    stat = Path(path).stat()
+    if checksum is None:
+        checksum = generate_checksum(local_file_pathname=path)
+    created = datetime.fromtimestamp(stat.st_ctime, timezone.utc).strftime(
+        TIMESTAMP_FORMAT
+    )
+    modified = datetime.fromtimestamp(stat.st_mtime, timezone.utc).strftime(
+        TIMESTAMP_FORMAT
+    )
+    headers = _build_headers(
+        config=config,
+        storage_name=storage_name,
+        extra={
+            "X-ICE-Size": str(stat.st_size),
+            "X-ICE-Checksum": checksum,
+            "X-ICE-Created": created,
+            "X-ICE-Modified": modified,
+        },
+        account_name=account_name,
+    )
+    for key, value in headers.items():
+        tus_client_obj.headers[key] = value
+    metadata = {"filename": _normalize_identifier(identifier=identifier)}
+    storage_path = user_state_path("tapest-client") / "tus_storage"
+    # Platformdirs 2.5.4 version does not support "ensure_exists"
+    # so this is a workaround for it.
+    storage_path.parent.mkdir(parents=True, exist_ok=True)
+    storage = filestorage.FileStorage(str(storage_path))
+    uploader = tus_client_obj.uploader(
+        file_path=path,
+        metadata=metadata,
+        chunk_size=chunk_size_in_bytes,
+        store_url=True,
+        url_storage=storage,
+    )
+    uploader.upload()
+    return retrieve_file_metadata(
+        config=config,
+        identifier=identifier,
+        storage_name=storage_name,
+        account_name=account_name,
+    )
 
 
 def ingest_file(

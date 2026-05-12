@@ -95,6 +95,7 @@ For per-command help, use `tapest-client <command> --help`.
 
 ```
 tapest-client ingest-one FILE_ID LOCAL_PATH [--storage NAME]
+tapest-client tus-ingest-one FILE_ID LOCAL_PATH [--storage NAME] [--chunk_size "128 MiB"]
 tapest-client ingest-many PATH [PATH ...] [--prefix PFX] [--skip] [--force]
 ```
 
@@ -104,10 +105,15 @@ walked recursively and each contained file's identifier extends the
 directory path with its relative location. `--prefix` is prepended to
 every derived identifier.
 
+`tus-ingest-one` behaves the same as `ingest-one` with small difference that
+it'll utilize resumable upload protocol endpoint. Client can also adjust
+the chunk size to be optimal for themselves.
+
 Examples:
 
 ```
 tapest-client ingest-one /path/to/identifier /local/file.dat
+tapest-client tus-ingest-one /path/to/identifier /local/file.dat --chunk_size "512 MiB"
 tapest-client ingest-many 2024/q1/*.dat 2024/q2/*.dat
 tapest-client ingest-many --prefix acme some_dir extra-file.dat --skip
 ```

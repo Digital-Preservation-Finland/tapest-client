@@ -115,6 +115,16 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_argument("--storage", default=None)
     sub.set_defaults(func=_run_ingest)
 
+    # tus-ingest-one
+    sub = subparsers.add_parser(
+        "tus-ingest-one", help="Ingest (upload) a single file via tus protocol"
+    )
+    sub.add_argument("file_id", metavar="FILE_ID")
+    sub.add_argument("local_path", metavar="LOCAL_PATH")
+    sub.add_argument("--storage", default=None)
+    sub.add_argument("--chunk_size", default="16 MiB")
+    sub.set_defaults(func=run_tus_ingest)
+
     # ingest-many
     sub = subparsers.add_parser(
         "ingest-many",
@@ -353,6 +363,34 @@ def _run_ingest(config: Config, args: argparse.Namespace) -> None:
     )
     result = tapest_client.ingest_file(
         config, args.file_id, args.local_path, storage_name=args.storage
+    )
+    _print_json(result)
+    logger.info(
+        "Successfully ingested file with identifier '%s' from "
+        "local pathname '%s'",
+        args.file_id,
+        args.local_path,
+    )
+
+
+def run_tus_ingest(config: Config, args: argparse.Namespace) -> None:
+    """Ingest a single file via tus."""
+    args.file_id = "/" + args.file_id.lstrip("/")
+    logger.info(
+        (
+            "Ingesting file at local pathname '%s' with identifier '%s' "
+            "in '%s' chunks..."
+        ),
+        args.local_path,
+        args.file_id,
+        args.chunk_size,
+    )
+    result = tapest_client.tus_ingest_file(
+        config=config,
+        identifier=args.file_id,
+        path=args.local_path,
+        storage_name=args.storage,
+        chunk_size=args.chunk_size,
     )
     _print_json(result)
     logger.info(

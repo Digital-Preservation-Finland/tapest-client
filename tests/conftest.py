@@ -2,10 +2,13 @@
 
 import dataclasses
 import itertools
+import re
 import types
 
 import pytest
+import requests_mock
 
+from base64 import b64decode
 from tapest_client.config import Config
 
 
@@ -35,7 +38,6 @@ CLIENT_CONFIG_DEFAULT = Config(
     default_sleep_duration=0,
     verify_ssl=True,
 )
-
 
 # -- Shared fixtures ---------------------------------------------------------
 
@@ -182,3 +184,117 @@ def cli_fx(monkeypatch):
             )
 
     return _Fixture()
+
+
+@pytest.fixture(scope="function")
+def mock_tus_endpoints(config_fx):
+    """Mock TUS endpoints by having dynamic responses."""
+    config = config_fx()
+    tus_url = f"^{config.host}/tus"
+    # We're processing all endpoints that starts with given tus_url.
+    matcher = re.compile(tus_url)
+    # Uploads will be tracked within this dictionary.
+    uploads = {}
+    tus_supported_extensions = ["creation", "termination"]
+    tus_version = "1.0.0"
+    tus_supported_version = ["1.0.0"]
+    options_headers = {
+        "Tus-Extension": ",".join(tus_supported_extensions),
+        "Tus-Resumable": tus_version,
+        "Tus-Version": ",".join(tus_supported_version),
+    }
+
+    def head_response(request, context):
+        try:
+            upload = uploads[request.path_url]
+        except KeyError:
+            context.status_code = 404
+            context.headers = {"Tus-Resumable": tus_version}
+            return ""
+
+        context.headers = {
+            "Cache-Control": "no-store",
+            "Tus-Resumable": tus_version,
+            "Upload-Offset": str(upload["chunks_uploaded"]),
+            "Upload-Metadata": upload["upload_metadata"],
+            "Upload-Length": str(upload["upload_length"]),
+        }
+        return ""
+
+    def patch_response(request, context):
+        nonlocal uploads
+        try:
+            upload = uploads[request.path_url]
+        except KeyError:
+            context.status_code = 404
+            context.headers = {"Tus-Resumable": tus_version}
+            return ""
+
+        content_length = int(request.headers["Content-Length"])
+        upload["chunks_uploaded"] += content_length
+        if upload["chunks_uploaded"] > upload["upload_length"]:
+            upload["chunks_uploaded"] = upload["upload_length"]
+        context.headers = {
+            "Tus-Resumable": tus_version,
+            "Upload-Offset": str(upload["chunks_uploaded"]),
+        }
+        return ""
+
+    def post_response(request, context):
+        nonlocal uploads
+        # Pick the filename from the metadata.
+        filename = None
+        for key_value in request.headers["Upload-Metadata"].split(","):
+            if key_value.startswith("filename"):
+                _, filename = key_value.split(" ")
+        if filename is None:
+            context.status_code = 400
+            context.headers = {"Tus-Resumable": tus_version}
+            return ""
+
+        filename = b64decode(filename).decode("UTF-8")
+        upload_id = f"{request.path_url}/{filename}"
+        uploads[upload_id] = {
+            "chunks_uploaded": 0,
+            "upload_metadata": request.headers["Upload-Metadata"],
+            "upload_length": int(request.headers["Upload-Length"]),
+        }
+
+        context.headers = {
+            "Location": upload_id,
+            "Tus-Resumable": tus_version,
+        }
+        return ""
+
+    def metadata_response(request, context):
+        try:
+            upload = uploads["/tus/" + request.qs.get("identifier")[0]]
+        except KeyError:
+            context.status_code = 404
+            return "{}"
+        if upload["chunks_uploaded"] == upload["upload_length"]:
+            return "{}"
+        context.status_code = 404
+        return "{}"
+
+    with requests_mock.Mocker() as mock:
+        mock.options(
+            matcher, text="", headers=options_headers, status_code=204
+        )
+        mock.head(matcher, text=head_response, status_code=204)
+        mock.patch(matcher, text=patch_response, status_code=204)
+        mock.post(matcher, text=post_response, status_code=201)
+        mock.get(
+            f"{config.host}/metadata", text=metadata_response, status_code=200
+        )
+        yield
+
+
+@pytest.fixture(scope="function", autouse=True)
+def monkeypatch_user_state_path(monkeypatch, tmp_path):
+    state_path = tmp_path / "state"
+    state_path.mkdir(exist_ok=True)
+    monkeypatch.setattr(
+        "tapest_client.client.user_state_path", lambda *a, **kw: state_path
+    )
+    yield

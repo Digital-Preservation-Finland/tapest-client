@@ -7,7 +7,6 @@ responses. All HTTP calls are mocked via the ``requests_fx`` fixture.
 
 import pytest
 import requests_mock
-
 from tapest_client.client import (
     TapestClientError,
     ingest_file,
@@ -22,6 +21,7 @@ from tapest_client.client import (
     ingest_files,
     extract_files_to_directory,
     generate_checksum,
+    tus_ingest_file,
 )
 
 from tests.conftest import mock_response
@@ -453,3 +453,18 @@ def test_ca_cert_path_ignored_when_verify_ssl_false(config_fx, requests_fx):
     """verify_ssl=False takes precedence over ca_cert_path."""
     retrieve_status(config_fx(verify_ssl=False, ca_cert_path="/some/ca.pem"))
     assert requests_fx.calls["get"]["verify"] is False
+
+
+@pytest.mark.usefixtures("mock_tus_endpoints")
+def test_tus_upload(tmp_path, config_fx):
+    """Test that we can upload with the tusclient without any issues."""
+    path = tmp_path / "file.dat"
+    path.write_bytes(b"my test file")
+    identifier = "this/is/my/test/file.dat"
+    config = config_fx()
+    tus_ingest_file(
+        config=config,
+        identifier=identifier,
+        path=str(path),
+        chunk_size="16.12 MiB",
+    )

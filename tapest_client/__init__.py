@@ -24,6 +24,7 @@ from .client import (
     retrieve_status,
     ingest_files,
     extract_files_to_directory,
+    tus_ingest_file,
 )
 
 __all__ = [
@@ -44,4 +45,5 @@ __all__ = [
     "retrieve_status",
     "ingest_files",
     "extract_files_to_directory",
+    "tus_ingest_file",
 ]

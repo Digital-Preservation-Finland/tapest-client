@@ -4,3 +4,4 @@ requests-mock
 
 # Dependencies
 requests
+tuspy @ git+https://github.com/tus/tus-py-client.git@e786fa850f0d8e0a2bd137dd91b5fef7c7b703a7

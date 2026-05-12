@@ -18,6 +18,7 @@ from tapest_client.cli import (
     _run_update_metadata,
     _run_ingest_many,
     _run_extract_files,
+    run_tus_ingest,
 )
 from tapest_client import TapestClientError
 
@@ -443,3 +444,19 @@ def test_load_config_host_override(tmp_path):
         config=str(conf), host="https://override", ca_cert=None
     )
     assert _load_config(args).host == "https://override"
+
+
+@pytest.mark.usefixtures("mock_tus_endpoints")
+def test_tus_upload(tmp_path, config_fx):
+    """Test that we can upload with the tus client via cli without any issues."""
+    path = tmp_path / "file.dat"
+    path.write_bytes(b"my test file")
+    identifier = "this/is/my/test/file.dat"
+    config = config_fx()
+    args = SimpleNamespace(
+        file_id=identifier,
+        local_path=str(path),
+        storage=None,
+        chunk_size="16 MiB",
+    )
+    run_tus_ingest(config=config, args=args)

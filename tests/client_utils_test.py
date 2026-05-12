@@ -17,6 +17,7 @@ from tapest_client.client import (
     generate_checksum,
     is_same_file,
     cleanup_file,
+    parse_chunk_size,
 )
 
 from tests.conftest import mock_response
@@ -237,6 +238,7 @@ def test_metadata_url_without_identifier(config_fx):
 
 # === URL encoding for special characters ===
 
+
 @pytest.mark.parametrize(
     "special_chars",
     [
@@ -328,3 +330,36 @@ def test_retry_non_202_error_returned(config_fx):
         lambda: resp, config_fx(max_retry_attempts=3), "test"
     )
     assert result.status_code == 500
+
+
+@pytest.mark.parametrize(
+    ("chunk_size", "expected_bytes"),
+    [
+        ("1 B", 1),
+        ("1 KiB", 1024),
+        ("16 MiB", 16 * 1024**2),  # the default
+        ("128 MiB", 128 * 1024**2),
+        ("1 GiB", 1024**3),
+        ("25.6 MiB", int(25.6 * 1024**2)),
+    ],
+)
+def test_parse_chunk_size_valid(chunk_size, expected_bytes):
+    """Happy-path: '<number> <unit>' parses to the right byte count."""
+    assert parse_chunk_size(chunk_size) == expected_bytes
+
+
+@pytest.mark.parametrize(
+    ("chunk_size", "expected_message"),
+    [
+        ("16MiB", "Could not parse"),
+        ("16 XiB", "Could not parse"),
+        ("abc MiB", "Could not parse"),
+        ("", "Could not parse"),
+        ("0 MiB", "must be positive"),
+        ("-5 MiB", "must be positive"),
+    ],
+)
+def test_parse_chunk_size_parse_error(chunk_size, expected_message):
+    """Bad inputs should match with expected error."""
+    with pytest.raises(TapestClientError, match=expected_message):
+        parse_chunk_size(chunk_size)
