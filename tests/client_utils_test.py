@@ -27,8 +27,10 @@ def test_checksum_known_content(tmp_path):
     """SHA-256 of known content matches expected digest."""
     path = tmp_path / "test.bin"
     path.write_bytes(b"hello world")
-    expected = ("sha256:b94d27b9934d3e08a52e52d7da7dab"
-                "fac484efe37a5380ee9088f7ace2efcde9")
+    expected = (
+        "sha256:b94d27b9934d3e08a52e52d7da7dab"
+        "fac484efe37a5380ee9088f7ace2efcde9"
+    )
     assert generate_checksum(str(path)) == expected
 
 
@@ -36,8 +38,10 @@ def test_checksum_empty_file(tmp_path):
     """Empty file produces the sha256 empty-input digest."""
     path = tmp_path / "empty"
     path.write_bytes(b"")
-    expected = ("sha256:e3b0c44298fc1c149afbf4c8996fb924"
-                "27ae41e4649b934ca495991b7852b855")
+    expected = (
+        "sha256:e3b0c44298fc1c149afbf4c8996fb924"
+        "27ae41e4649b934ca495991b7852b855"
+    )
     assert generate_checksum(str(path)) == expected
 
 
@@ -90,8 +94,8 @@ def test_same_file_short_circuits_on_size(tmp_path, monkeypatch):
     path.write_bytes(b"hello world")
     called = []
     monkeypatch.setattr(
-        "tapest_client.client.generate_checksum",
-        lambda *a: called.append(1))
+        "tapest_client.client.generate_checksum", lambda *a: called.append(1)
+    )
     assert is_same_file(str(path), 999, "sha256:irrelevant") is False
     assert called == []
 
@@ -133,8 +137,7 @@ def test_headers_minimal(config_fx):
 def test_headers_all_options(config_fx):
     """Account, storage name, and extra headers are all included."""
     cfg = config_fx()
-    headers = _build_headers(cfg, storage_name="s1",
-                             extra={"X-Custom": "val"})
+    headers = _build_headers(cfg, storage_name="s1", extra={"X-Custom": "val"})
     assert headers["Authorization"] == f"Bearer {cfg.token}"
     assert headers["X-ICE-Account"] == cfg.storage_account_name
     assert headers["X-ICE-Storage"] == "s1"
@@ -196,7 +199,8 @@ def test_retry_immediate_success(config_fx):
     """Non-202 response is returned immediately."""
     resp = mock_response(200)
     result = _request_with_retry(
-        lambda: resp, config_fx(max_retry_attempts=3), "test")
+        lambda: resp, config_fx(max_retry_attempts=3), "test"
+    )
     assert result.status_code == 200
 
 
@@ -208,22 +212,26 @@ def test_retry_202_then_success(config_fx):
     ]
     it = iter(responses)
     result = _request_with_retry(
-        lambda: next(it), config_fx(max_retry_attempts=5), "test")
+        lambda: next(it), config_fx(max_retry_attempts=5), "test"
+    )
     assert result.status_code == 201
 
 
 def test_retry_max_attempts(config_fx):
     """Raises after exhausting all retry attempts."""
     resp = mock_response(202, headers={"Retry-After": "0"})
-    with pytest.raises(TapestClientError,
-                       match="file unavailable after 2 attempts"):
+    with pytest.raises(
+        TapestClientError, match="file unavailable after 2 attempts"
+    ):
         _request_with_retry(
-            lambda: resp, config_fx(max_retry_attempts=2), "test")
+            lambda: resp, config_fx(max_retry_attempts=2), "test"
+        )
 
 
 def test_retry_non_202_error_returned(config_fx):
     """Non-202 errors are returned to caller, not raised."""
     resp = mock_response(500)
     result = _request_with_retry(
-        lambda: resp, config_fx(max_retry_attempts=3), "test")
+        lambda: resp, config_fx(max_retry_attempts=3), "test"
+    )
     assert result.status_code == 500

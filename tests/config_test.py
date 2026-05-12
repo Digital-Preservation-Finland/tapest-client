@@ -28,15 +28,19 @@ def reset_config():
 def test_read_from_file(tmp_path):
     """read() loads all keys from JSON file with correct types."""
     conf = tmp_path / "client.conf"
-    conf.write_text(json.dumps({
-        "token": "tok123",
-        "host": "https://tapest.example.com",
-        "storage_account_name": "testaccount",
-        "max_retry_attempts": 5,
-        "default_sleep_duration": 30,
-        "cleanup_on_fail": True,
-        "verify_ssl": False,
-    }))
+    conf.write_text(
+        json.dumps(
+            {
+                "token": "tok123",
+                "host": "https://tapest.example.com",
+                "storage_account_name": "testaccount",
+                "max_retry_attempts": 5,
+                "default_sleep_duration": 30,
+                "cleanup_on_fail": True,
+                "verify_ssl": False,
+            }
+        )
+    )
     cfg = Config()
     cfg.read(config_file=str(conf))
     assert cfg.token == "tok123"
@@ -51,10 +55,14 @@ def test_read_from_file(tmp_path):
 def test_env_overrides_file(tmp_path, monkeypatch):
     """Environment variables override file values."""
     conf = tmp_path / "client.conf"
-    conf.write_text(json.dumps({
-        "token": "file-tok",
-        "host": "https://file.example.com",
-    }))
+    conf.write_text(
+        json.dumps(
+            {
+                "token": "file-tok",
+                "host": "https://file.example.com",
+            }
+        )
+    )
     monkeypatch.setenv("TAPEST_CLIENT_TOKEN", "env-tok")
     monkeypatch.setenv("TAPEST_CLIENT_VERIFY_SSL", "false")
     cfg = Config()

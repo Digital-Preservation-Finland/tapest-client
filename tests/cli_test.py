@@ -6,20 +6,32 @@ from types import SimpleNamespace
 import pytest
 
 from tapest_client.cli import (
-    build_parser, main, _load_config,
-    _run_status, _run_write_config, _run_ingest, _run_extract, _run_delete,
-    _run_query_metadata, _run_update_metadata, _run_ingest_many,
+    build_parser,
+    main,
+    _load_config,
+    _run_status,
+    _run_write_config,
+    _run_ingest,
+    _run_extract,
+    _run_delete,
+    _run_query_metadata,
+    _run_update_metadata,
+    _run_ingest_many,
     _run_extract_files,
 )
 from tapest_client import TapestClientError
 
 
-
 def _metadata_args(**overrides):
     """Build a metadata args namespace with sensible defaults."""
     defaults = dict(
-        file_id=None, prefix=None, identifier=None,
-        storage=None, pending=False, errors=False, order=None,
+        file_id=None,
+        prefix=None,
+        identifier=None,
+        storage=None,
+        pending=False,
+        errors=False,
+        order=None,
         limit=None,
     )
     defaults.update(overrides)
@@ -27,6 +39,7 @@ def _metadata_args(**overrides):
 
 
 # -- Parsing ------------------------------------------------------------------
+
 
 def test_no_args_shows_help(monkeypatch, capsys):
     """No arguments prints help and exits with code 1."""
@@ -46,9 +59,20 @@ def test_help_exits_0():
 
 def test_ingest_parses_all_options():
     """ingest-one parses all global and subcommand options."""
-    args = build_parser().parse_args([
-        "-v", "--config", "/conf", "--host", "https://h",
-        "ingest-one", "--storage", "tape-1", "/id", "/path"])
+    args = build_parser().parse_args(
+        [
+            "-v",
+            "--config",
+            "/conf",
+            "--host",
+            "https://h",
+            "ingest-one",
+            "--storage",
+            "tape-1",
+            "/id",
+            "/path",
+        ]
+    )
     assert args.verbose is True
     assert args.config == "/conf"
     assert args.host == "https://h"
@@ -59,10 +83,23 @@ def test_ingest_parses_all_options():
 
 def test_metadata_query_params():
     """query-metadata parses repeatable and flag options."""
-    args = build_parser().parse_args([
-        "query-metadata", "--prefix", "pfx1", "--prefix", "pfx2",
-        "--identifier", "id1", "--pending", "--errors",
-        "--order", "ingested", "--limit", "10"])
+    args = build_parser().parse_args(
+        [
+            "query-metadata",
+            "--prefix",
+            "pfx1",
+            "--prefix",
+            "pfx2",
+            "--identifier",
+            "id1",
+            "--pending",
+            "--errors",
+            "--order",
+            "ingested",
+            "--limit",
+            "10",
+        ]
+    )
     assert args.prefix == ["pfx1", "pfx2"]
     assert args.identifier == ["id1"]
     assert args.pending is True
@@ -72,9 +109,17 @@ def test_metadata_query_params():
 
 def test_ingest_many_parses_options():
     """ingest-many parses one-or-more paths plus --prefix/--skip/--force."""
-    args = build_parser().parse_args([
-        "ingest-many", "--prefix", "acme", "--skip",
-        "/path/a.dat", "/path/b.dat", "/path/dir1"])
+    args = build_parser().parse_args(
+        [
+            "ingest-many",
+            "--prefix",
+            "acme",
+            "--skip",
+            "/path/a.dat",
+            "/path/b.dat",
+            "/path/dir1",
+        ]
+    )
     assert args.paths == ["/path/a.dat", "/path/b.dat", "/path/dir1"]
     assert args.prefix == "acme"
     assert args.skip is True
@@ -84,11 +129,13 @@ def test_ingest_many_parses_options():
 def test_extract_with_next_id():
     """extract-one accepts optional next file identifier."""
     args = build_parser().parse_args(
-        ["extract-one", "/id", "/path", "/next-id"])
+        ["extract-one", "/id", "/path", "/next-id"]
+    )
     assert args.next_file_id == "/next-id"
 
 
 # -- Handlers -----------------------------------------------------------------
+
 
 def test_status(config_fx, cli_fx, capsys):
     """status handler prints JSON service status."""
@@ -99,13 +146,12 @@ def test_status(config_fx, cli_fx, capsys):
 
 def test_ingest_calls_library(config_fx, cli_fx, capsys):
     """ingest-one passes file_id, path, and storage_name to library."""
-    cli_fx(
-        "ingest_file",
-        return_value={"identifier": "/id", "size": 100})
+    cli_fx("ingest_file", return_value={"identifier": "/id", "size": 100})
     args = SimpleNamespace(file_id="/id", local_path="/path", storage=None)
     _run_ingest(config_fx(), args)
     assert cli_fx.calls["ingest_file"] == [
-        (("/id", "/path"), {"storage_name": None})]
+        (("/id", "/path"), {"storage_name": None})
+    ]
     assert json.loads(capsys.readouterr().out)["identifier"] == "/id"
 
 
@@ -115,18 +161,20 @@ def test_ingest_normalizes_leading_slash(config_fx, cli_fx):
     args = SimpleNamespace(file_id="id", local_path="/path", storage=None)
     _run_ingest(config_fx(), args)
     assert cli_fx.calls["ingest_file"] == [
-        (("/id", "/path"), {"storage_name": None})]
+        (("/id", "/path"), {"storage_name": None})
+    ]
 
 
 def test_extract_calls_library(config_fx, cli_fx):
     """extract-one passes file_id, path, next_identifier, and storage_name."""
     cli_fx("extract_file", return_value={"identifier": "/id"})
     args = SimpleNamespace(
-        file_id="/id", local_path="/path",
-        next_file_id=None, storage=None)
+        file_id="/id", local_path="/path", next_file_id=None, storage=None
+    )
     _run_extract(config_fx(), args)
     assert cli_fx.calls["extract_file"] == [
-        (("/id", "/path"), {"next_identifier": None, "storage_name": None})]
+        (("/id", "/path"), {"next_identifier": None, "storage_name": None})
+    ]
 
 
 def test_delete_calls_library(config_fx, cli_fx):
@@ -139,49 +187,64 @@ def test_delete_calls_library(config_fx, cli_fx):
 
 # -- Metadata modes -----------------------------------------------------------
 
+
 def test_metadata_retrieve_single(config_fx, cli_fx, capsys):
     """query-metadata with file_id retrieves single file metadata."""
-    cli_fx(
-        "retrieve_file_metadata",
-        return_value={"identifier": "/id"})
+    cli_fx("retrieve_file_metadata", return_value={"identifier": "/id"})
     _run_query_metadata(config_fx(), _metadata_args(file_id="/id"))
     assert cli_fx.calls["retrieve_file_metadata"] == [
-        (("/id",), {"storage_name": None})]
+        (("/id",), {"storage_name": None})
+    ]
 
 
 def test_metadata_query_builds_correct_body(config_fx, cli_fx, capsys):
     """query-metadata without file_id builds correct query dict."""
-    cli_fx(
-        "retrieve_metadata",
-        return_value={"metadata": []})
-    _run_query_metadata(config_fx(), _metadata_args(
-        prefix=["pfx1"], identifier=["id1"], pending=True,
-        order="ingested", limit=10))
-    assert cli_fx.calls["retrieve_metadata"] == [((), {
-        "query": {
-            "prefixes": ["pfx1"], "identifiers": ["id1"],
-            "pending_only": True, "order_by": "ingested", "limit": 10,
-        },
-        "storage_name": None,
-    })]
+    cli_fx("retrieve_metadata", return_value={"metadata": []})
+    _run_query_metadata(
+        config_fx(),
+        _metadata_args(
+            prefix=["pfx1"],
+            identifier=["id1"],
+            pending=True,
+            order="ingested",
+            limit=10,
+        ),
+    )
+    assert cli_fx.calls["retrieve_metadata"] == [
+        (
+            (),
+            {
+                "query": {
+                    "prefixes": ["pfx1"],
+                    "identifiers": ["id1"],
+                    "pending_only": True,
+                    "order_by": "ingested",
+                    "limit": 10,
+                },
+                "storage_name": None,
+            },
+        )
+    ]
 
 
 def test_update_metadata(config_fx, cli_fx, capsys):
     """update-metadata parses JSON input and passes it to library."""
-    cli_fx(
-        "update_file_metadata",
-        return_value={"identifier": "/id"})
+    cli_fx("update_file_metadata", return_value={"identifier": "/id"})
     args = SimpleNamespace(
         file_id="/id",
         json_input='{"stored": "2030-01-01T00:00:00Z"}',
-        storage=None, stdin=False, json_file=None)
+        storage=None,
+        stdin=False,
+        json_file=None,
+    )
     _run_update_metadata(config_fx(), args)
     assert cli_fx.calls["update_file_metadata"] == [
-        (("/id", {"stored": "2030-01-01T00:00:00Z"}),
-         {"storage_name": None})]
+        (("/id", {"stored": "2030-01-01T00:00:00Z"}), {"storage_name": None})
+    ]
 
 
 # -- Batch operations ---------------------------------------------------------
+
 
 def test_ingest_many_files(tmp_path, monkeypatch, config_fx, cli_fx):
     """Plain file paths become identifiers built from the path-as-given."""
@@ -190,12 +253,15 @@ def test_ingest_many_files(tmp_path, monkeypatch, config_fx, cli_fx):
     (tmp_path / "b.dat").write_bytes(b"b")
     cli_fx("ingest_files", return_value=[])
     args = SimpleNamespace(
-        paths=["a.dat", "b.dat"], skip=False, force=False, prefix=None)
+        paths=["a.dat", "b.dat"], skip=False, force=False, prefix=None
+    )
     _run_ingest_many(config_fx(), args)
-    assert cli_fx.calls["ingest_files"] == [(
-        ([("/a.dat", "a.dat"), ("/b.dat", "b.dat")],),
-        {"skip": False, "force": False},
-    )]
+    assert cli_fx.calls["ingest_files"] == [
+        (
+            ([("/a.dat", "a.dat"), ("/b.dat", "b.dat")],),
+            {"skip": False, "force": False},
+        )
+    ]
 
 
 def test_ingest_many_directory(tmp_path, monkeypatch, config_fx, cli_fx):
@@ -208,13 +274,20 @@ def test_ingest_many_directory(tmp_path, monkeypatch, config_fx, cli_fx):
     (d / "sub" / "b.dat").write_bytes(b"b")
     cli_fx("ingest_files", return_value=[])
     args = SimpleNamespace(
-        paths=["acme"], skip=False, force=False, prefix=None)
+        paths=["acme"], skip=False, force=False, prefix=None
+    )
     _run_ingest_many(config_fx(), args)
-    assert cli_fx.calls["ingest_files"] == [(
-        ([("/acme/a.dat", "acme/a.dat"),
-          ("/acme/sub/b.dat", "acme/sub/b.dat")],),
-        {"skip": False, "force": False},
-    )]
+    assert cli_fx.calls["ingest_files"] == [
+        (
+            (
+                [
+                    ("/acme/a.dat", "acme/a.dat"),
+                    ("/acme/sub/b.dat", "acme/sub/b.dat"),
+                ],
+            ),
+            {"skip": False, "force": False},
+        )
+    ]
 
 
 def test_ingest_many_mixed(tmp_path, monkeypatch, config_fx, cli_fx):
@@ -226,13 +299,15 @@ def test_ingest_many_mixed(tmp_path, monkeypatch, config_fx, cli_fx):
     (d / "in.dat").write_bytes(b"y")
     cli_fx("ingest_files", return_value=[])
     args = SimpleNamespace(
-        paths=["loose.dat", "dir1"], skip=False, force=False, prefix=None)
+        paths=["loose.dat", "dir1"], skip=False, force=False, prefix=None
+    )
     _run_ingest_many(config_fx(), args)
-    assert cli_fx.calls["ingest_files"] == [(
-        ([("/loose.dat", "loose.dat"),
-          ("/dir1/in.dat", "dir1/in.dat")],),
-        {"skip": False, "force": False},
-    )]
+    assert cli_fx.calls["ingest_files"] == [
+        (
+            ([("/loose.dat", "loose.dat"), ("/dir1/in.dat", "dir1/in.dat")],),
+            {"skip": False, "force": False},
+        )
+    ]
 
 
 def test_ingest_many_with_prefix(tmp_path, monkeypatch, config_fx, cli_fx):
@@ -244,62 +319,86 @@ def test_ingest_many_with_prefix(tmp_path, monkeypatch, config_fx, cli_fx):
     (d / "b.dat").write_bytes(b"b")
     cli_fx("ingest_files", return_value=[])
     args = SimpleNamespace(
-        paths=["a.dat", "dir1"], skip=False, force=False, prefix="acme/2024")
+        paths=["a.dat", "dir1"], skip=False, force=False, prefix="acme/2024"
+    )
     _run_ingest_many(config_fx(), args)
-    assert cli_fx.calls["ingest_files"] == [(
-        ([("/acme/2024/a.dat", "a.dat"),
-          ("/acme/2024/dir1/b.dat", "dir1/b.dat")],),
-        {"skip": False, "force": False},
-    )]
+    assert cli_fx.calls["ingest_files"] == [
+        (
+            (
+                [
+                    ("/acme/2024/a.dat", "a.dat"),
+                    ("/acme/2024/dir1/b.dat", "dir1/b.dat"),
+                ],
+            ),
+            {"skip": False, "force": False},
+        )
+    ]
 
 
 def test_ingest_many_missing_path(tmp_path, config_fx):
     """ingest-many raises if a CLI path is neither file nor directory."""
     args = SimpleNamespace(
-        paths=[str(tmp_path / "nope.dat")], skip=False, force=False,
-        prefix=None)
+        paths=[str(tmp_path / "nope.dat")],
+        skip=False,
+        force=False,
+        prefix=None,
+    )
     with pytest.raises(TapestClientError, match="does not exist"):
         _run_ingest_many(config_fx(), args)
 
 
-@pytest.mark.parametrize("prefix_input", [
-    "acme/2024", "/acme/2024", "acme/2024/", "/acme/2024/", "//acme/2024//"])
+@pytest.mark.parametrize(
+    "prefix_input",
+    ["acme/2024", "/acme/2024", "acme/2024/", "/acme/2024/", "//acme/2024//"],
+)
 def test_ingest_many_prefix_normalization(
-        tmp_path, monkeypatch, config_fx, cli_fx, prefix_input):
+    tmp_path, monkeypatch, config_fx, cli_fx, prefix_input
+):
     """--prefix is normalized to a single leading '/' with no trailing '/'."""
     monkeypatch.chdir(tmp_path)
     (tmp_path / "a.dat").write_bytes(b"a")
     cli_fx("ingest_files", return_value=[])
     args = SimpleNamespace(
-        paths=["a.dat"], skip=False, force=False, prefix=prefix_input)
+        paths=["a.dat"], skip=False, force=False, prefix=prefix_input
+    )
     _run_ingest_many(config_fx(), args)
     assert cli_fx.calls["ingest_files"][0][0][0] == [
-        ("/acme/2024/a.dat", "a.dat")]
+        ("/acme/2024/a.dat", "a.dat")
+    ]
 
 
 def test_extract_files(config_fx, cli_fx, capsys):
     """extract-many queries metadata then extracts matching files."""
     metadata = {"metadata": [{"identifier": "/a"}, {"identifier": "/b"}]}
     cli_fx("retrieve_metadata", return_value=metadata)
-    cli_fx(
-        "extract_files_to_directory",
-        return_value=[{"identifier": "/a"}])
+    cli_fx("extract_files_to_directory", return_value=[{"identifier": "/a"}])
     args = SimpleNamespace(
-        local_dir="/dir", prefix=["pfx"],
-        identifier=None, skip=False, force=False, storage=None)
+        local_dir="/dir",
+        prefix=["pfx"],
+        identifier=None,
+        skip=False,
+        force=False,
+        storage=None,
+    )
     _run_extract_files(config_fx(), args)
 
 
 def test_extract_files_requires_source(config_fx):
     """extract-many exits if neither --prefix nor --identifier is given."""
     args = SimpleNamespace(
-        local_dir="/dir", prefix=None,
-        identifier=None, skip=False, force=False, storage=None)
+        local_dir="/dir",
+        prefix=None,
+        identifier=None,
+        skip=False,
+        force=False,
+        storage=None,
+    )
     with pytest.raises(SystemExit):
         _run_extract_files(config_fx(), args)
 
 
 # -- Error handling & config --------------------------------------------------
+
 
 def test_tapest_error_exits_1(monkeypatch):
     """TapestClientError during execution exits with code 1."""
@@ -307,7 +406,8 @@ def test_tapest_error_exits_1(monkeypatch):
     monkeypatch.setattr("tapest_client.cli._load_config", lambda args: None)
     monkeypatch.setattr(
         "tapest_client.cli.tapest_client.retrieve_status",
-        lambda cfg: (_ for _ in ()).throw(TapestClientError("fail")))
+        lambda cfg: (_ for _ in ()).throw(TapestClientError("fail")),
+    )
     with pytest.raises(SystemExit) as exc_info:
         main()
     assert exc_info.value.code == 1
@@ -340,5 +440,6 @@ def test_load_config_host_override(tmp_path):
     conf = tmp_path / "client.conf"
     conf.write_text('{"host": "https://h", "token": "tok"}')
     args = SimpleNamespace(
-        config=str(conf), host="https://override", ca_cert=None)
+        config=str(conf), host="https://override", ca_cert=None
+    )
     assert _load_config(args).host == "https://override"

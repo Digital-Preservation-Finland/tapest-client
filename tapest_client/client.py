@@ -73,9 +73,12 @@ class TapestClientError(Exception):
 # === Internal Helpers ===
 
 
-def _build_headers(config: Config, storage_name: str | None = None,
-                   extra: dict[str, str] | None = None,
-                   account_name: str | None = None) -> dict[str, str]:
+def _build_headers(
+    config: Config,
+    storage_name: str | None = None,
+    extra: dict[str, str] | None = None,
+    account_name: str | None = None,
+) -> dict[str, str]:
     """Build common request headers from config.
 
     ``account_name`` overrides ``X-ICE-Account`` per request; falls
@@ -113,8 +116,9 @@ def _verify_param(config: Config) -> str | bool:
     return config.verify_ssl
 
 
-def _request_with_retry(request_fn: Callable[[], requests.Response],
-                        config: Config, error_msg: str) -> requests.Response:
+def _request_with_retry(
+    request_fn: Callable[[], requests.Response], config: Config, error_msg: str
+) -> requests.Response:
     """Execute request_fn in a retry loop, handling 202 Retry-After responses.
 
     Returns the first non-202 response. Raises TapestClientError if max
@@ -130,7 +134,7 @@ def _request_with_retry(request_fn: Callable[[], requests.Response],
         time.sleep(seconds)
     raise TapestClientError(
         f"{error_msg}: file unavailable after {max_attempts} attempts",
-        exit_code=117
+        exit_code=117,
     )
 
 
@@ -146,8 +150,9 @@ def generate_checksum(local_file_pathname: str | Path) -> str:
     return f"sha256:{sha256_hash.hexdigest()}"
 
 
-def is_same_file(local_file_pathname: str | Path, size: int,
-                 checksum: str) -> bool:
+def is_same_file(
+    local_file_pathname: str | Path, size: int, checksum: str
+) -> bool:
     """Check if file matches expected size and checksum."""
     try:
         if Path(local_file_pathname).stat().st_size != size:
@@ -242,9 +247,13 @@ def ingest_file(
     )
 
 
-def recache_file(config: Config, identifier: str, local_file_pathname: str,
-                 storage_name: str | None = None,
-                 account_name: str | None = None) -> dict:
+def recache_file(
+    config: Config,
+    identifier: str,
+    local_file_pathname: str,
+    storage_name: str | None = None,
+    account_name: str | None = None,
+) -> dict:
     """Re-upload a cached file, verifying it matches.
 
     See :func:`ingest_file` for the semantics of ``account_name``.
@@ -268,13 +277,18 @@ def recache_file(config: Config, identifier: str, local_file_pathname: str,
         )
 
     url = _file_url(config, identifier)
-    headers = _build_headers(config, storage_name, {
-        "X-ICE-Size": str(file_metadata["size"]),
-        "X-ICE-Checksum": file_metadata["checksum"],
-        "X-ICE-Created": file_metadata["created"],
-        "X-ICE-Modified": file_metadata["modified"],
-        "X-ICE-Recache": "true",
-    }, account_name=account_name)
+    headers = _build_headers(
+        config,
+        storage_name,
+        {
+            "X-ICE-Size": str(file_metadata["size"]),
+            "X-ICE-Checksum": file_metadata["checksum"],
+            "X-ICE-Created": file_metadata["created"],
+            "X-ICE-Modified": file_metadata["modified"],
+            "X-ICE-Recache": "true",
+        },
+        account_name=account_name,
+    )
     verify_ssl = _verify_param(config)
 
     def do_request():
@@ -294,10 +308,14 @@ def recache_file(config: Config, identifier: str, local_file_pathname: str,
     )
 
 
-def extract_file(config: Config, identifier: str, local_file_pathname: str,
-                 next_identifier: str | None = None,
-                 storage_name: str | None = None,
-                 account_name: str | None = None) -> dict:
+def extract_file(
+    config: Config,
+    identifier: str,
+    local_file_pathname: str,
+    next_identifier: str | None = None,
+    storage_name: str | None = None,
+    account_name: str | None = None,
+) -> dict:
     """Extract a file by identifier to a local path.
 
     See :func:`ingest_file` for the semantics of ``account_name``.
@@ -306,16 +324,23 @@ def extract_file(config: Config, identifier: str, local_file_pathname: str,
         config, identifier, storage_name, account_name=account_name
     )
     return extract_file_with_metadata(
-        config, file_metadata, local_file_pathname,
-        next_identifier, storage_name, account_name=account_name
+        config,
+        file_metadata,
+        local_file_pathname,
+        next_identifier,
+        storage_name,
+        account_name=account_name,
     )
 
 
-def extract_file_with_metadata(config: Config, file_metadata: dict,
-                               local_file_pathname: str,
-                               next_identifier: str | None = None,
-                               storage_name: str | None = None,
-                               account_name: str | None = None) -> dict:
+def extract_file_with_metadata(
+    config: Config,
+    file_metadata: dict,
+    local_file_pathname: str,
+    next_identifier: str | None = None,
+    storage_name: str | None = None,
+    account_name: str | None = None,
+) -> dict:
     """Extract a file using provided metadata to a local path.
 
     Uses its own retry loop because the response body must be written to
@@ -332,7 +357,8 @@ def extract_file_with_metadata(config: Config, file_metadata: dict,
     identifier = file_metadata["identifier"]
     url = _file_url(config, identifier)
     headers = _build_headers(
-        config, storage_name or file_metadata.get("storage"),
+        config,
+        storage_name or file_metadata.get("storage"),
         account_name=account_name,
     )
     if next_identifier:
@@ -370,20 +396,24 @@ def extract_file_with_metadata(config: Config, file_metadata: dict,
                     f"Failed to extract file {identifier}: checksum mismatch"
                 )
 
-            created_ts = datetime.strptime(
-                file_metadata["created"], TIMESTAMP_FORMAT
-            ).replace(tzinfo=timezone.utc).timestamp()
-            modified_ts = datetime.strptime(
-                file_metadata["modified"], TIMESTAMP_FORMAT
-            ).replace(tzinfo=timezone.utc).timestamp()
+            created_ts = (
+                datetime.strptime(file_metadata["created"], TIMESTAMP_FORMAT)
+                .replace(tzinfo=timezone.utc)
+                .timestamp()
+            )
+            modified_ts = (
+                datetime.strptime(file_metadata["modified"], TIMESTAMP_FORMAT)
+                .replace(tzinfo=timezone.utc)
+                .timestamp()
+            )
             os.utime(path, (created_ts, modified_ts))
 
             return file_metadata
 
         if response.status_code == 202:
-            seconds = int(response.headers.get(
-                "Retry-After", default_duration
-            ))
+            seconds = int(
+                response.headers.get("Retry-After", default_duration)
+            )
             time.sleep(seconds)
             continue
 
@@ -397,13 +427,16 @@ def extract_file_with_metadata(config: Config, file_metadata: dict,
     raise TapestClientError(
         f"Failed to extract file {identifier}: "
         f"file unavailable after {max_attempts} attempts",
-        exit_code=117
+        exit_code=117,
     )
 
 
-def delete_file(config: Config, identifier: str,
-                storage_name: str | None = None,
-                account_name: str | None = None) -> None:
+def delete_file(
+    config: Config,
+    identifier: str,
+    storage_name: str | None = None,
+    account_name: str | None = None,
+) -> None:
     """Delete a file by identifier.
 
     See :func:`ingest_file` for the semantics of ``account_name``.
@@ -420,9 +453,12 @@ def delete_file(config: Config, identifier: str,
     )
 
 
-def retrieve_file_metadata(config: Config, identifier: str,
-                           storage_name: str | None = None,
-                           account_name: str | None = None) -> dict:
+def retrieve_file_metadata(
+    config: Config,
+    identifier: str,
+    storage_name: str | None = None,
+    account_name: str | None = None,
+) -> dict:
     """Retrieve metadata for a single file.
 
     See :func:`ingest_file` for the semantics of ``account_name``.
@@ -439,10 +475,13 @@ def retrieve_file_metadata(config: Config, identifier: str,
     )
 
 
-def update_file_metadata(config: Config, identifier: str,
-                         file_metadata_update: dict,
-                         storage_name: str | None = None,
-                         account_name: str | None = None) -> dict:
+def update_file_metadata(
+    config: Config,
+    identifier: str,
+    file_metadata_update: dict,
+    storage_name: str | None = None,
+    account_name: str | None = None,
+) -> dict:
     """Update metadata for a single file.
 
     See :func:`ingest_file` for the semantics of ``account_name``.
@@ -461,9 +500,12 @@ def update_file_metadata(config: Config, identifier: str,
     )
 
 
-def retrieve_metadata(config: Config, query: dict | None = None,
-                      storage_name: str | None = None,
-                      account_name: str | None = None) -> dict:
+def retrieve_metadata(
+    config: Config,
+    query: dict | None = None,
+    storage_name: str | None = None,
+    account_name: str | None = None,
+) -> dict:
     """Retrieve metadata matching query parameters.
 
     See :func:`ingest_file` for the semantics of ``account_name``.
@@ -577,12 +619,15 @@ def _conflict_action(skip: bool, force: bool, same: bool) -> _ConflictAction:
     return _ConflictAction.ERROR
 
 
-def extract_files_to_directory(config: Config, metadata: list[dict],
-                               local_directory_pathname: str,
-                               skip: bool = False, force: bool = False,
-                               storage_name: str | None = None,
-                               account_name: str | None = None
-                               ) -> list[dict]:
+def extract_files_to_directory(
+    config: Config,
+    metadata: list[dict],
+    local_directory_pathname: str,
+    skip: bool = False,
+    force: bool = False,
+    storage_name: str | None = None,
+    account_name: str | None = None,
+) -> list[dict]:
     """Extract files described in metadata list to a directory tree.
 
     See :func:`ingest_file` for the semantics of ``account_name``.
@@ -602,10 +647,16 @@ def extract_files_to_directory(config: Config, metadata: list[dict],
         path = root / identifier.lstrip("/")
 
         if not path.exists():
-            extracted.append(extract_file_with_metadata(
-                config, file_metadata, str(path), next_id, storage_name,
-                account_name=account_name,
-            ))
+            extracted.append(
+                extract_file_with_metadata(
+                    config,
+                    file_metadata,
+                    str(path),
+                    next_id,
+                    storage_name,
+                    account_name=account_name,
+                )
+            )
             continue
         if not (skip or force):
             # Raise before hashing; is_same_file reads the whole file.
@@ -618,10 +669,16 @@ def extract_files_to_directory(config: Config, metadata: list[dict],
             continue
         if action is _ConflictAction.REPLACE:
             path.unlink()
-            extracted.append(extract_file_with_metadata(
-                config, file_metadata, str(path), next_id, storage_name,
-                account_name=account_name,
-            ))
+            extracted.append(
+                extract_file_with_metadata(
+                    config,
+                    file_metadata,
+                    str(path),
+                    next_id,
+                    storage_name,
+                    account_name=account_name,
+                )
+            )
             continue
         raise TapestClientError(f"File already exists at {path}")
 

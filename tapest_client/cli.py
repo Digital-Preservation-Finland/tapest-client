@@ -60,12 +60,19 @@ logger = logging.getLogger("tapest-client")
 DEFAULT_CONFIG = json.dumps(dataclasses.asdict(Config()), indent=2) + "\n"
 
 METADATA_ORDER_CHOICES = [
-    "identifier", "storage", "ingested", "stored",
-    "checked", "required", "recached", "extracted",
+    "identifier",
+    "storage",
+    "ingested",
+    "stored",
+    "checked",
+    "required",
+    "recached",
+    "extracted",
 ]
 
 
 # -- Parser construction -----------------------------------------------------
+
 
 def build_parser() -> argparse.ArgumentParser:
     """Build the argument parser with all subcommands."""
@@ -73,32 +80,36 @@ def build_parser() -> argparse.ArgumentParser:
         prog="tapest-client",
         description="TapeSt command-line client",
         formatter_class=lambda prog: argparse.HelpFormatter(
-            prog, max_help_position=40),
+            prog, max_help_position=40
+        ),
     )
 
     verbosity = parser.add_mutually_exclusive_group()
     verbosity.add_argument(
-        "-v", "--verbose", action="store_true",
-        help="verbose output")
+        "-v", "--verbose", action="store_true", help="verbose output"
+    )
     verbosity.add_argument(
-        "-V", "--debug", action="store_true",
-        help="debug output (implies verbose)")
+        "-V",
+        "--debug",
+        action="store_true",
+        help="debug output (implies verbose)",
+    )
 
+    parser.add_argument("--config", default=None, help="configuration file")
+    parser.add_argument("--host", default=None, help="API host URL")
     parser.add_argument(
-        "--config", default=None,
-        help="configuration file")
-    parser.add_argument(
-        "--host", default=None,
-        help="API host URL")
-    parser.add_argument(
-        "--ca-cert", default=None, metavar="PATH",
-        help="CA certificate bundle (PEM) for SSL verification")
+        "--ca-cert",
+        default=None,
+        metavar="PATH",
+        help="CA certificate bundle (PEM) for SSL verification",
+    )
 
     subparsers = parser.add_subparsers(dest="command", metavar="COMMAND")
 
     # ingest-one
     sub = subparsers.add_parser(
-        "ingest-one", help="Ingest (upload) a single file")
+        "ingest-one", help="Ingest (upload) a single file"
+    )
     sub.add_argument("file_id", metavar="FILE_ID")
     sub.add_argument("local_path", metavar="LOCAL_PATH")
     sub.add_argument("--storage", default=None)
@@ -107,97 +118,129 @@ def build_parser() -> argparse.ArgumentParser:
     # ingest-many
     sub = subparsers.add_parser(
         "ingest-many",
-        help="Ingest (upload) one or more files and/or directory trees")
+        help="Ingest (upload) one or more files and/or directory trees",
+    )
     sub.add_argument(
-        "paths", metavar="PATH", nargs="+",
+        "paths",
+        metavar="PATH",
+        nargs="+",
         help="files and/or directories to ingest; identifiers are derived "
-             "from the paths as given (directories are walked recursively)")
+        "from the paths as given (directories are walked recursively)",
+    )
     sub.add_argument(
-        "--prefix", default=None,
-        help="prepend this prefix to every derived identifier")
+        "--prefix",
+        default=None,
+        help="prepend this prefix to every derived identifier",
+    )
     sub.add_argument(
-        "--skip", action="store_true",
-        help="skip files that already exist and match")
+        "--skip",
+        action="store_true",
+        help="skip files that already exist and match",
+    )
     sub.add_argument(
-        "--force", action="store_true",
-        help="overwrite files that already exist")
+        "--force",
+        action="store_true",
+        help="overwrite files that already exist",
+    )
     sub.set_defaults(func=_run_ingest_many)
 
     # extract-one
     sub = subparsers.add_parser(
-        "extract-one",
-        help="Extract (download) a single file from the service")
+        "extract-one", help="Extract (download) a single file from the service"
+    )
     sub.add_argument("file_id", metavar="FILE_ID")
     sub.add_argument("local_path", metavar="LOCAL_PATH")
     sub.add_argument(
-        "next_file_id", metavar="NEXT_FILE_ID", nargs="?", default=None)
+        "next_file_id", metavar="NEXT_FILE_ID", nargs="?", default=None
+    )
     sub.add_argument("--storage", default=None)
     sub.set_defaults(func=_run_extract)
 
     # extract-many
     sub = subparsers.add_parser(
         "extract-many",
-        help="Extract (download) files from the service to a directory")
+        help="Extract (download) files from the service to a directory",
+    )
     sub.add_argument("local_dir", metavar="LOCAL_DIR")
     sub.add_argument(
-        "--prefix", action="append", default=None,
-        help="file identifier prefix (repeatable)")
+        "--prefix",
+        action="append",
+        default=None,
+        help="file identifier prefix (repeatable)",
+    )
     sub.add_argument(
-        "--identifier", action="append", default=None,
-        help="file identifier (repeatable)")
+        "--identifier",
+        action="append",
+        default=None,
+        help="file identifier (repeatable)",
+    )
     sub.add_argument(
-        "--skip", action="store_true",
-        help="skip files that already exist and match")
+        "--skip",
+        action="store_true",
+        help="skip files that already exist and match",
+    )
     sub.add_argument(
-        "--force", action="store_true",
-        help="overwrite files that already exist")
+        "--force",
+        action="store_true",
+        help="overwrite files that already exist",
+    )
     sub.add_argument("--storage", default=None)
     sub.set_defaults(func=_run_extract_files)
 
     # delete
     sub = subparsers.add_parser(
-        "delete",
-        help="Delete a single file and its metadata from the service")
+        "delete", help="Delete a single file and its metadata from the service"
+    )
     sub.add_argument("file_id", metavar="FILE_ID")
     sub.add_argument("--storage", default=None)
     sub.set_defaults(func=_run_delete)
 
     # query-metadata
     sub = subparsers.add_parser(
-        "query-metadata", help="Query metadata for one or many files")
+        "query-metadata", help="Query metadata for one or many files"
+    )
+    sub.add_argument("file_id", metavar="FILE_ID", nargs="?", default=None)
     sub.add_argument(
-        "file_id", metavar="FILE_ID", nargs="?", default=None)
+        "--prefix",
+        action="append",
+        default=None,
+        help="file identifier prefix (repeatable)",
+    )
     sub.add_argument(
-        "--prefix", action="append", default=None,
-        help="file identifier prefix (repeatable)")
-    sub.add_argument(
-        "--identifier", action="append", default=None,
-        help="file identifier (repeatable)")
+        "--identifier",
+        action="append",
+        default=None,
+        help="file identifier (repeatable)",
+    )
     sub.add_argument("--storage", default=None)
     sub.add_argument(
-        "--pending", action="store_true",
-        help="pending files only")
+        "--pending", action="store_true", help="pending files only"
+    )
     sub.add_argument(
-        "--errors", action="store_true",
-        help="files with errors only")
-    sub.add_argument(
-        "--order", choices=METADATA_ORDER_CHOICES, default=None)
+        "--errors", action="store_true", help="files with errors only"
+    )
+    sub.add_argument("--order", choices=METADATA_ORDER_CHOICES, default=None)
     sub.add_argument("--limit", type=int, default=None)
     sub.set_defaults(func=_run_query_metadata)
 
     # update-metadata
     sub = subparsers.add_parser(
-        "update-metadata", help="Update metadata for a single file")
+        "update-metadata", help="Update metadata for a single file"
+    )
     sub.add_argument("file_id", metavar="FILE_ID")
     sub.add_argument(
-        "json_input", metavar="JSON", nargs="?", default=None,
-        help="JSON string, or - for stdin")
+        "json_input",
+        metavar="JSON",
+        nargs="?",
+        default=None,
+        help="JSON string, or - for stdin",
+    )
     sub.add_argument(
-        "--file", dest="json_file", default=None,
-        help="read JSON from file")
+        "--file", dest="json_file", default=None, help="read JSON from file"
+    )
     sub.add_argument(
-        "--stdin", action="store_true",
-        help="read JSON from stdin")
+        "--stdin", action="store_true", help="read JSON from stdin"
+    )
     sub.add_argument("--storage", default=None)
     sub.set_defaults(func=_run_update_metadata)
 
@@ -207,13 +250,15 @@ def build_parser() -> argparse.ArgumentParser:
 
     # write-config
     sub = subparsers.add_parser(
-        "write-config", help="Write default configuration file")
+        "write-config", help="Write default configuration file"
+    )
     sub.set_defaults(func=_run_write_config, needs_config=False)
 
     return parser
 
 
 # -- Utilities ---------------------------------------------------------------
+
 
 def _setup_logging(args: argparse.Namespace) -> None:
     """Configure logging based on verbosity flags."""
@@ -255,13 +300,16 @@ def _load_config(args: argparse.Namespace) -> Config:
     if not config.host:
         raise TapestClientError(
             "No API host configured. Set host in "
-            f"{config_file} or {USER_CONFIG_FILE}")
+            f"{config_file} or {USER_CONFIG_FILE}"
+        )
     if not config.token:
         raise TapestClientError(
             "No API token configured. Set token in "
-            f"{config_file} or TAPEST_CLIENT_TOKEN env var")
-    logger.debug("Config: host=%s account=%s",
-                 config.host, config.storage_account_name)
+            f"{config_file} or TAPEST_CLIENT_TOKEN env var"
+        )
+    logger.debug(
+        "Config: host=%s account=%s", config.host, config.storage_account_name
+    )
     return config
 
 
@@ -272,8 +320,10 @@ def _print_json(data: object) -> None:
 
 # -- Subcommand handlers -----------------------------------------------------
 
-def _run_write_config(_config: Config | None,
-                      args: argparse.Namespace) -> None:
+
+def _run_write_config(
+    _config: Config | None, args: argparse.Namespace
+) -> None:
     """Write a default configuration file to the user config directory."""
     path = Path(USER_CONFIG_FILE)
     if path.is_file():
@@ -296,75 +346,94 @@ def _run_status(config: Config, args: argparse.Namespace) -> None:
 def _run_ingest(config: Config, args: argparse.Namespace) -> None:
     """Ingest a single file."""
     args.file_id = "/" + args.file_id.lstrip("/")
-    logger.info("Ingesting file at local pathname '%s' with identifier "
-                "'%s' ...", args.local_path, args.file_id)
+    logger.info(
+        "Ingesting file at local pathname '%s' with identifier '%s' ...",
+        args.local_path,
+        args.file_id,
+    )
     result = tapest_client.ingest_file(
-        config, args.file_id, args.local_path,
-        storage_name=args.storage)
+        config, args.file_id, args.local_path, storage_name=args.storage
+    )
     _print_json(result)
-    logger.info("Successfully ingested file with identifier '%s' from "
-                "local pathname '%s'", args.file_id, args.local_path)
+    logger.info(
+        "Successfully ingested file with identifier '%s' from "
+        "local pathname '%s'",
+        args.file_id,
+        args.local_path,
+    )
 
 
 def _run_extract(config: Config, args: argparse.Namespace) -> None:
     """Extract a single file."""
-    logger.info("Extracting file with identifier '%s' to local pathname "
-                "'%s' ...", args.file_id, args.local_path)
+    logger.info(
+        "Extracting file with identifier '%s' to local pathname '%s' ...",
+        args.file_id,
+        args.local_path,
+    )
     result = tapest_client.extract_file(
-        config, args.file_id, args.local_path,
+        config,
+        args.file_id,
+        args.local_path,
         next_identifier=args.next_file_id,
-        storage_name=args.storage)
+        storage_name=args.storage,
+    )
     _print_json(result)
-    logger.info("Successfully extracted file with identifier '%s' to "
-                "local pathname '%s'", args.file_id, args.local_path)
+    logger.info(
+        "Successfully extracted file with identifier '%s' to "
+        "local pathname '%s'",
+        args.file_id,
+        args.local_path,
+    )
 
 
 def _run_delete(config: Config, args: argparse.Namespace) -> None:
     """Delete a file."""
     logger.info("Deleting file with identifier '%s' ...", args.file_id)
-    tapest_client.delete_file(
-        config, args.file_id, storage_name=args.storage)
-    logger.info("Successfully deleted file with identifier '%s'",
-                args.file_id)
+    tapest_client.delete_file(config, args.file_id, storage_name=args.storage)
+    logger.info("Successfully deleted file with identifier '%s'", args.file_id)
 
 
 def _build_query(args: argparse.Namespace) -> dict:
     """Build a metadata query dict from CLI arguments."""
     query = {}
-    if getattr(args, 'prefix', None):
+    if getattr(args, "prefix", None):
         query["prefixes"] = args.prefix
-    if getattr(args, 'identifier', None):
+    if getattr(args, "identifier", None):
         query["identifiers"] = args.identifier
-    if getattr(args, 'pending', False):
+    if getattr(args, "pending", False):
         query["pending_only"] = True
-    if getattr(args, 'errors', False):
+    if getattr(args, "errors", False):
         query["errors_only"] = True
-    if getattr(args, 'order', None):
+    if getattr(args, "order", None):
         query["order_by"] = args.order
-    if getattr(args, 'limit', None) is not None:
+    if getattr(args, "limit", None) is not None:
         query["limit"] = args.limit
     return query
 
 
-def _run_query_metadata(config: Config,
-                        args: argparse.Namespace) -> None:
+def _run_query_metadata(config: Config, args: argparse.Namespace) -> None:
     """Query file metadata for a single file or by filter."""
     if args.file_id:
-        logger.info("Retrieving metadata for file with identifier "
-                    "'%s' ...", args.file_id)
+        logger.info(
+            "Retrieving metadata for file with identifier '%s' ...",
+            args.file_id,
+        )
         result = tapest_client.retrieve_file_metadata(
-            config, args.file_id, storage_name=args.storage)
+            config, args.file_id, storage_name=args.storage
+        )
     else:
-        logger.info("Retrieving metadata for all files matching input "
-                    "parameters ...")
+        logger.info(
+            "Retrieving metadata for all files matching input "
+            "parameters ..."
+        )
         query = _build_query(args)
         result = tapest_client.retrieve_metadata(
-            config, query=query, storage_name=args.storage)
+            config, query=query, storage_name=args.storage
+        )
     _print_json(result)
 
 
-def _run_update_metadata(config: Config,
-                         args: argparse.Namespace) -> None:
+def _run_update_metadata(config: Config, args: argparse.Namespace) -> None:
     """Update file metadata."""
     if args.json_input is None and not args.stdin and not args.json_file:
         logger.error("Provide JSON string, -f FILE, - or --stdin")
@@ -382,18 +451,20 @@ def _run_update_metadata(config: Config,
         raise TapestClientError(
             f"update-metadata {args.file_id}: {exc}"
         ) from exc
-    logger.info("Updating metadata for file with identifier "
-                "'%s' ...", args.file_id)
+    logger.info(
+        "Updating metadata for file with identifier '%s' ...", args.file_id
+    )
     result = tapest_client.update_file_metadata(
-        config, args.file_id, update,
-        storage_name=args.storage)
+        config, args.file_id, update, storage_name=args.storage
+    )
     _print_json(result)
-    logger.info("Successfully updated metadata for file with "
-                "identifier '%s'", args.file_id)
+    logger.info(
+        "Successfully updated metadata for file with identifier '%s'",
+        args.file_id,
+    )
 
 
-def _run_ingest_many(config: Config,
-                     args: argparse.Namespace) -> None:
+def _run_ingest_many(config: Config, args: argparse.Namespace) -> None:
     """Ingest one or more files and/or directory trees.
 
     Each CLI path becomes an identifier built from the path as given:
@@ -420,13 +491,13 @@ def _run_ingest_many(config: Config,
 
     logger.info("Ingesting %d file(s) ...", len(files))
     results = tapest_client.ingest_files(
-        config, files, skip=args.skip, force=args.force)
+        config, files, skip=args.skip, force=args.force
+    )
     _print_json(results)
     logger.info("Successfully ingested %d file(s)", len(results))
 
 
-def _run_extract_files(config: Config,
-                       args: argparse.Namespace) -> None:
+def _run_extract_files(config: Config, args: argparse.Namespace) -> None:
     """Extract files to a directory."""
     if not any([args.prefix, args.identifier]):
         logger.error("extract-many requires at least one of -p or -i")
@@ -435,25 +506,35 @@ def _run_extract_files(config: Config,
     query = _build_query(args)
     logger.info("Retrieving metadata for files to extract ...")
     metadata_result = tapest_client.retrieve_metadata(
-        config, query=query, storage_name=args.storage)
+        config, query=query, storage_name=args.storage
+    )
     metadata_list = metadata_result.get("metadata", [])
 
     if not metadata_list:
         logger.info("No files match the specified criteria")
         return
 
-    logger.info("Extracting %d file(s) to '%s' ...",
-                len(metadata_list), args.local_dir)
+    logger.info(
+        "Extracting %d file(s) to '%s' ...", len(metadata_list), args.local_dir
+    )
     results = tapest_client.extract_files_to_directory(
-        config, metadata_list, args.local_dir,
-        skip=args.skip, force=args.force,
-        storage_name=args.storage)
+        config,
+        metadata_list,
+        args.local_dir,
+        skip=args.skip,
+        force=args.force,
+        storage_name=args.storage,
+    )
     _print_json(results)
-    logger.info("Successfully extracted %d file(s) to '%s'",
-                len(results), args.local_dir)
+    logger.info(
+        "Successfully extracted %d file(s) to '%s'",
+        len(results),
+        args.local_dir,
+    )
 
 
 # -- Entry point -------------------------------------------------------------
+
 
 def main() -> None:
     """Main CLI entry point."""
@@ -465,7 +546,7 @@ def main() -> None:
     _setup_logging(args)
 
     try:
-        if getattr(args, 'needs_config', True):
+        if getattr(args, "needs_config", True):
             config = _load_config(args)
         else:
             config = None
@@ -475,7 +556,7 @@ def main() -> None:
         sys.exit(1)
     except TapestClientError as exc:
         logger.error("Error: %s", exc)
-        sys.exit(getattr(exc, 'exit_code', 1))
+        sys.exit(getattr(exc, "exit_code", 1))
     except KeyboardInterrupt:
         sys.exit(130)
 

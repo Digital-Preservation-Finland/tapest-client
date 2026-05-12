@@ -12,8 +12,11 @@ from tapest_client.config import Config
 def pytest_addoption(parser):
     """Add custom command line options."""
     parser.addoption(
-        "--run-slow", action="store_true", default=False,
-        help="Run slow tests (benchmarks, etc.)")
+        "--run-slow",
+        action="store_true",
+        default=False,
+        help="Run slow tests (benchmarks, etc.)",
+    )
 
 
 def pytest_runtest_setup(item):
@@ -48,10 +51,13 @@ _CONFIG_PERMUTATIONS = [
 ]
 
 
-@pytest.fixture(params=_CONFIG_PERMUTATIONS, ids=[
-    " ".join(f"{k}={v}" for k, v in p.items())
-    for p in _CONFIG_PERMUTATIONS
-])
+@pytest.fixture(
+    params=_CONFIG_PERMUTATIONS,
+    ids=[
+        " ".join(f"{k}={v}" for k, v in p.items())
+        for p in _CONFIG_PERMUTATIONS
+    ],
+)
 def config_fx(request):
     """Create a Config based on CLIENT_CONFIG_DEFAULT with optional overrides.
 
@@ -68,11 +74,13 @@ def config_fx(request):
 
     def _make(**overrides):
         return dataclasses.replace(base, **overrides)
+
     return _make
 
 
-def mock_response(status_code, json_data=None, text="",
-                  headers=None, content=None):
+def mock_response(
+    status_code, json_data=None, text="", headers=None, content=None
+):
     """Build a fake requests.Response with the given attributes.
 
     Pass *content* (bytes) for download responses that need
@@ -126,15 +134,17 @@ def requests_fx(monkeypatch):
             calls[method_name] = kwargs
             all_calls.setdefault(method_name, []).append(kwargs)
             return _resolve(responses.get(method_name, _ok))
+
         return _fake
 
     for method in ("get", "put", "delete", "post", "patch"):
         monkeypatch.setattr(
-            f"tapest_client.client.requests.{method}",
-            _make_fake(method))
+            f"tapest_client.client.requests.{method}", _make_fake(method)
+        )
 
     return types.SimpleNamespace(
-        calls=calls, all_calls=all_calls, responses=responses)
+        calls=calls, all_calls=all_calls, responses=responses
+    )
 
 
 @pytest.fixture
@@ -168,6 +178,7 @@ def cli_fx(monkeypatch):
                 return return_value
 
             monkeypatch.setattr(
-                f"tapest_client.cli.tapest_client.{func_name}", _fake)
+                f"tapest_client.cli.tapest_client.{func_name}", _fake
+            )
 
     return _Fixture()

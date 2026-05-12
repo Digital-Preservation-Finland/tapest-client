@@ -15,8 +15,18 @@ import pytest
 
 FILE_SIZE = 256 * 1024 * 1024  # 256 MB
 BUFFER_SIZES = [
-    4096, 8192, 32768, 65536, 131072, 262144,
-    524288, 1048576, 2097152, 4194304, 16777216, 67108864,
+    4096,
+    8192,
+    32768,
+    65536,
+    131072,
+    262144,
+    524288,
+    1048576,
+    2097152,
+    4194304,
+    16777216,
+    67108864,
 ]
 
 
@@ -45,9 +55,12 @@ def _label(size):
 
 @pytest.mark.slow
 @pytest.mark.benchmark(group="sha256-buffer-size")
-@pytest.mark.parametrize("buffer_size", BUFFER_SIZES, ids=[_label(s) for s in BUFFER_SIZES])
+@pytest.mark.parametrize(
+    "buffer_size", BUFFER_SIZES, ids=[_label(s) for s in BUFFER_SIZES]
+)
 def test_sha256_buffer_size(benchmark, test_file, buffer_size):
     """Benchmark SHA-256 hashing with different read buffer sizes."""
+
     def hash_file():
         h = hashlib.sha256()
         with open(test_file, "rb") as f:

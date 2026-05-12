@@ -77,6 +77,7 @@ def _coerce(field_type: type, value: Any) -> Any:
 @dataclasses.dataclass
 class Config:
     """TapeSt client configuration."""
+
     token: str = ""
     host: str = ""
     storage_account_name: str = ""
