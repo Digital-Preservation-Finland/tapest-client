@@ -97,14 +97,16 @@ def _build_headers(
 
 def _file_url(config: Config, identifier: str) -> str:
     """Build /file endpoint URL."""
-    encoded = urllib.parse.quote(identifier, safe="")
+    encoded = urllib.parse.quote(
+        _normalize_identifier(identifier), safe="")
     return f"{config.host}/file?identifier={encoded}"
 
 
 def _metadata_url(config: Config, identifier: str | None = None) -> str:
     """Build /metadata endpoint URL."""
     if identifier:
-        encoded = urllib.parse.quote(identifier, safe="")
+        encoded = urllib.parse.quote(
+            _normalize_identifier(identifier), safe="")
         return f"{config.host}/metadata?identifier={encoded}"
     return f"{config.host}/metadata"
 
@@ -136,6 +138,13 @@ def _request_with_retry(
         f"{error_msg}: file unavailable after {max_attempts} attempts",
         exit_code=117,
     )
+
+
+def _normalize_identifier(identifier: str | list) -> str | list:
+    """Normalize identifier path(s) to a single leading forward slash"""
+    if isinstance(identifier, list):
+        return [_normalize_identifier(i) for i in identifier]
+    return "/" + identifier.lstrip("/")
 
 
 # === Utility Functions ===
@@ -363,7 +372,7 @@ def extract_file_with_metadata(
     )
     if next_identifier:
         headers["X-ICE-Next-File"] = urllib.parse.quote(
-            next_identifier, safe=""
+            _normalize_identifier(next_identifier), safe=""
         )
 
     verify_ssl = _verify_param(config)
@@ -513,6 +522,13 @@ def retrieve_metadata(
     url = _metadata_url(config)
     headers = _build_headers(config, storage_name, account_name=account_name)
     verify_ssl = _verify_param(config)
+    if query:
+        for target_field in ("prefixes", "identifiers"):
+            if query.get(target_field):
+                query[target_field] = _normalize_identifier(
+                    query[target_field]
+                )
+
     response = requests.post(
         url, json=query or {}, headers=headers, verify=verify_ssl
     )

@@ -12,6 +12,7 @@ from tapest_client.client import (
     _build_headers,
     _file_url,
     _metadata_url,
+    _normalize_identifier,
     _request_with_retry,
     generate_checksum,
     is_same_file,
@@ -19,6 +20,47 @@ from tapest_client.client import (
 )
 
 from tests.conftest import mock_response
+
+
+# === _normalize_identifier ===
+
+
+def test_normalize_identifier_adds_slash():
+    """Prepends a leading '/' when the identifier has none."""
+    assert _normalize_identifier("foo/bar") == "/foo/bar"
+
+
+def test_normalize_identifier_keeps_single_slash():
+    """Leaves a correctly-formed identifier unchanged."""
+    assert _normalize_identifier("/foo/bar") == "/foo/bar"
+
+
+def test_normalize_identifier_removes_extra_slashes():
+    """Collapses multiple leading slashes to exactly one."""
+    assert _normalize_identifier("///foo/bar") == "/foo/bar"
+
+
+def test_normalize_identifier_empty_string():
+    """Empty string normalizes to the root identifier '/'."""
+    assert _normalize_identifier("") == "/"
+
+
+def test_normalize_identifier_list():
+    """Normalizes every element in a list of identifiers."""
+    result = _normalize_identifier(["foo", "/bar", "///baz"])
+    assert result == ["/foo", "/bar", "/baz"]
+
+
+def test_normalize_identifier_list_returns_list():
+    """Returns a list when the input is a list."""
+    result = _normalize_identifier(["/single"])
+    assert isinstance(result, list)
+
+
+def test_normalize_identifier_str_returns_str():
+    """Returns a str when the input is a str."""
+    result = _normalize_identifier("/single")
+    assert isinstance(result, str)
 
 
 # === generate_checksum ===
@@ -198,7 +240,7 @@ def test_metadata_url_without_identifier(config_fx):
 @pytest.mark.parametrize(
     "special_chars",
     [
-        "with!@#$%^&*()chars",
+        "/with!@#$%^&*()chars",
         "/path/with space<tab>\t<newline>\nchars.dat",
         "/path/with\"single'double\\backslash[brackets]{braces}.dat",
         "/ÄäÖöÅåÍíÜüÆæ.dat",
