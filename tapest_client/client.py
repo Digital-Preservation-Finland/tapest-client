@@ -35,11 +35,11 @@
 #
 # Dict-style access (config["key"]) is also supported via Config.
 #
-# File identifiers are normalized to UTF-8 NFC by the API on receive.
-# The client passes identifiers through unchanged; the canonical NFC
-# form is returned in API responses, so an identifier passed in NFD
-# (e.g. "a" + combining diaeresis) will appear as NFC ("a-umlaut") in
-# the returned metadata.
+# File identifiers are normalized by the client to canonical leading-
+# slash form (`/foo/bar`) before being sent, and by the API to UTF-8
+# NFC on receive. The identifier returned in API responses is the
+# canonical form, so a value passed in as `foo/bar` or in NFD will
+# appear as `/foo/bar` in NFC in the returned metadata.
 # ----------------------------------------------------------------------
 
 from __future__ import annotations
@@ -197,9 +197,10 @@ def ingest_file(
     A single stat() call is used to collect size, creation time and
     modification time, avoiding redundant filesystem round-trips.
 
-    The ``identifier`` is sent to the API as-is. The API normalizes it
-    to UTF-8 NFC, so the ``identifier`` field in the returned metadata
-    may differ from the value passed in.
+    The ``identifier`` is normalized to canonical leading-slash form
+    by the client, and to UTF-8 NFC by the API on receive. The
+    ``identifier`` field in the returned metadata is the canonical
+    form, which may differ from the value passed in.
 
     :param config: Config instance.
     :param identifier: File identifier.
