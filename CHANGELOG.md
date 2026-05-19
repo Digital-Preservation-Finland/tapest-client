@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 0.0.7 - 2026-05-18
+
+### Added
+- Per-call `account_name` override on all library API functions that send the `X-ICE-Account` header. Callers can pass `account_name=` to `ingest_file`, `recache_file`, `extract_file`, `extract_file_with_metadata`, `delete_file`, `retrieve_file_metadata`, `update_file_metadata`, `retrieve_metadata`, `ingest_files`, and `extract_files_to_directory`; it falls back to `config.storage_account_name` when omitted. This lets a single client config serve multiple tenants without rewriting `storage_account_name` per job.
+
+### Changed
+- Leading-slash identifier normalization is now applied uniformly, not just in `ingest-one`/`ingest-many`. Identifiers used to build `/file` and `/metadata` URLs, the `X-ICE-Next-File` chain hint in `extract_file_with_metadata`, and the `prefixes` / `identifiers` fields of `retrieve_metadata` queries are all normalized to begin with exactly one `/`.
+
 ## 0.0.6 - 2026-04-29
 
 ### Added
