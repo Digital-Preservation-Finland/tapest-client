@@ -5,10 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## 0.0.8 - 2026-05-25
+## 0.0.8 - 2026-05-27
 
 ### Added
 - TUS resumable upload support via the `tus-ingest-one` CLI command.
+
+### Changed
+- `--force` (ingest and extract) now treats a file whose checksum already matches the server copy as a no-op instead of replacing it.
+
+### Fixed
+- `tus_ingest_file` now honors `config.verify_ssl` / `ca_cert_path`. Previously the TUS upload always verified TLS, which broke uploads to a `verify_ssl=False` or privately-signed (CA) endpoint even though every other call honored the setting.
 
 ## 0.0.7 - 2026-05-18
 

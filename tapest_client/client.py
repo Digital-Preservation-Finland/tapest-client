@@ -276,6 +276,7 @@ def tus_ingest_file(
         chunk_size=chunk_size_in_bytes,
         store_url=True,
         url_storage=storage,
+        verify_tls_cert=_verify_param(config),
     )
     uploader.upload()
     return retrieve_file_metadata(
