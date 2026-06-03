@@ -256,15 +256,19 @@ def tus_ingest_file(
         storage_name=storage_name,
         extra={
             "X-ICE-Size": str(stat.st_size),
-            "X-ICE-Checksum": checksum,
-            "X-ICE-Created": created,
-            "X-ICE-Modified": modified,
         },
         account_name=account_name,
     )
     for key, value in headers.items():
         tus_client_obj.headers[key] = value
-    metadata = {"filename": _normalize_identifier(identifier=identifier)}
+    # File-identity metadata travels in the TUS Upload-Metadata, so it is
+    # captured once on POST initialization and persisted by the server.
+    metadata = {
+        "filename": _normalize_identifier(identifier=identifier),
+        "X-ICE-Checksum": checksum,
+        "X-ICE-Created": created,
+        "X-ICE-Modified": modified,
+    }
     storage_path = user_state_path("tapest-client") / "tus_storage"
     # Platformdirs 2.5.4 version does not support "ensure_exists"
     # so this is a workaround for it.
