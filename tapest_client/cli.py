@@ -52,7 +52,7 @@ import sys
 
 import requests
 import tapest_client
-from tapest_client import TapestClientError
+from tapest_client import TapestClientError, normalize_identifier
 from tapest_client.config import CONFIG_FILE, Config
 
 logger = logging.getLogger("tapest-client")
@@ -357,7 +357,7 @@ def _run_status(config: Config, args: argparse.Namespace) -> None:
 
 def _run_ingest(config: Config, args: argparse.Namespace) -> None:
     """Ingest a single file."""
-    args.file_id = "/" + args.file_id.lstrip("/")
+    args.file_id = normalize_identifier(args.file_id)
     logger.info(
         "Ingesting file at local pathname '%s' with identifier '%s' ...",
         args.local_path,
@@ -377,7 +377,7 @@ def _run_ingest(config: Config, args: argparse.Namespace) -> None:
 
 def run_tus_ingest(config: Config, args: argparse.Namespace) -> None:
     """Ingest a single file via tus."""
-    args.file_id = "/" + args.file_id.lstrip("/")
+    args.file_id = normalize_identifier(args.file_id)
     logger.info(
         (
             "Ingesting file at local pathname '%s' with identifier '%s' "
@@ -513,19 +513,22 @@ def _run_ingest_many(config: Config, args: argparse.Namespace) -> None:
     path plus its relative location inside the tree. ``--prefix`` is
     prepended to every derived identifier.
     """
-    prefix = "/" + args.prefix.strip("/") if args.prefix else ""
+    prefix = args.prefix or ""
 
     files: list[tuple[str, str]] = []
     for cli_path in args.paths:
         p = Path(cli_path)
-        base = "/" + p.as_posix().strip("/")
+        base = p.as_posix()
+        # Identifiers are built by naive join and canonicalized centrally,
+        # so '.', '..', '//' and stray slashes all collapse to '/<relpath>'.
         if p.is_file():
-            files.append((prefix + base, str(p)))
+            files.append((normalize_identifier(f"{prefix}/{base}"), str(p)))
         elif p.is_dir():
             for sub in sorted(p.rglob("*")):
                 if sub.is_file():
                     rel = sub.relative_to(p).as_posix()
-                    files.append((prefix + base + "/" + rel, str(sub)))
+                    identifier = normalize_identifier(f"{prefix}/{base}/{rel}")
+                    files.append((identifier, str(sub)))
         else:
             raise TapestClientError(f"Path does not exist: {cli_path}")
 

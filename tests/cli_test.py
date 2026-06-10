@@ -283,6 +283,32 @@ def test_ingest_many_directory(tmp_path, monkeypatch, config_fx, cli_fx):
     ]
 
 
+def test_ingest_many_cwd_dot(tmp_path, monkeypatch, config_fx, cli_fx):
+    """'ingest-many .' from inside a directory yields clean '/<relpath>' ids.
+
+    Passing '.' must produce the same identifiers as passing the directory
+    by an explicit path, with no '/./' segment.
+    """
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "a.dat").write_bytes(b"a")
+    (tmp_path / "sub").mkdir()
+    (tmp_path / "sub" / "b.dat").write_bytes(b"b")
+    cli_fx("ingest_files", return_value=[])
+    args = SimpleNamespace(paths=["."], skip=False, force=False, prefix=None)
+    _run_ingest_many(config_fx(), args)
+    assert cli_fx.calls["ingest_files"] == [
+        (
+            (
+                [
+                    ("/a.dat", "a.dat"),
+                    ("/sub/b.dat", "sub/b.dat"),
+                ],
+            ),
+            {"skip": False, "force": False},
+        )
+    ]
+
+
 def test_ingest_many_mixed(tmp_path, monkeypatch, config_fx, cli_fx):
     """Files and directories can be passed together in one invocation."""
     monkeypatch.chdir(tmp_path)

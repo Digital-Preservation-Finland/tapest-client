@@ -12,7 +12,7 @@ from tapest_client.client import (
     _build_headers,
     _file_url,
     _metadata_url,
-    _normalize_identifier,
+    normalize_identifier,
     _request_with_retry,
     generate_checksum,
     is_same_file,
@@ -23,45 +23,82 @@ from tapest_client.client import (
 from tests.conftest import mock_response
 
 
-# === _normalize_identifier ===
+# === normalize_identifier ===
 
 
 def test_normalize_identifier_adds_slash():
     """Prepends a leading '/' when the identifier has none."""
-    assert _normalize_identifier("foo/bar") == "/foo/bar"
+    assert normalize_identifier("foo/bar") == "/foo/bar"
 
 
 def test_normalize_identifier_keeps_single_slash():
     """Leaves a correctly-formed identifier unchanged."""
-    assert _normalize_identifier("/foo/bar") == "/foo/bar"
+    assert normalize_identifier("/foo/bar") == "/foo/bar"
 
 
 def test_normalize_identifier_removes_extra_slashes():
     """Collapses multiple leading slashes to exactly one."""
-    assert _normalize_identifier("///foo/bar") == "/foo/bar"
+    assert normalize_identifier("///foo/bar") == "/foo/bar"
 
 
 def test_normalize_identifier_empty_string():
     """Empty string normalizes to the root identifier '/'."""
-    assert _normalize_identifier("") == "/"
+    assert normalize_identifier("") == "/"
 
 
 def test_normalize_identifier_list():
     """Normalizes every element in a list of identifiers."""
-    result = _normalize_identifier(["foo", "/bar", "///baz"])
+    result = normalize_identifier(["foo", "/bar", "///baz"])
     assert result == ["/foo", "/bar", "/baz"]
 
 
 def test_normalize_identifier_list_returns_list():
     """Returns a list when the input is a list."""
-    result = _normalize_identifier(["/single"])
+    result = normalize_identifier(["/single"])
     assert isinstance(result, list)
 
 
 def test_normalize_identifier_str_returns_str():
     """Returns a str when the input is a str."""
-    result = _normalize_identifier("/single")
+    result = normalize_identifier("/single")
     assert isinstance(result, str)
+
+
+@pytest.mark.parametrize(
+    "raw, expected",
+    [
+        ("/./foo", "/foo"),
+        ("/foo/./bar", "/foo/bar"),
+        ("foo//bar", "/foo/bar"),
+        ("foo/../bar", "/bar"),
+        ("/../foo", "/foo"),
+        ("/foo/bar/..", "/foo"),
+        (".", "/"),
+        ("..", "/"),
+    ],
+)
+def test_normalize_identifier_canonicalizes_segments(raw, expected):
+    """Collapses '.', '//' and resolves '..' to a canonical path."""
+    assert normalize_identifier(raw) == expected
+
+
+@pytest.mark.parametrize(
+    "raw, expected",
+    [
+        ("/foo/", "/foo/"),
+        ("/foo/bar/", "/foo/bar/"),
+        ("/foo//", "/foo/"),
+        ("/foo/./", "/foo/"),
+    ],
+)
+def test_normalize_identifier_preserves_trailing_slash(raw, expected):
+    """Keeps a trailing slash so prefix queries '/foo/' stay distinct."""
+    assert normalize_identifier(raw) == expected
+
+
+def test_normalize_identifier_keeps_dotted_names():
+    """Names that merely contain dots are preserved (only '.'/'..' collapse)."""
+    assert normalize_identifier("/a/..b/...") == "/a/..b/..."
 
 
 # === generate_checksum ===

@@ -94,7 +94,7 @@ def _build_headers(
 ) -> dict[str, str]:
     """Build common request headers from config.
 
-    ``account_name`` overrides ``X-ICE-Account`` per request; falls
+    ``account_name`` overrides ``X-TAPEST-Account`` per request; falls
     back to ``config.storage_account_name`` when unset.
     """
     headers = {"Authorization": f"Bearer {config.token}"}
@@ -110,7 +110,7 @@ def _build_headers(
 
 def _file_url(config: Config, identifier: str) -> str:
     """Build /file endpoint URL."""
-    encoded = urllib.parse.quote(_normalize_identifier(identifier), safe="")
+    encoded = urllib.parse.quote(normalize_identifier(identifier), safe="")
     return f"{config.host}/file?identifier={encoded}"
 
 
@@ -118,7 +118,7 @@ def _metadata_url(config: Config, identifier: str | None = None) -> str:
     """Build /metadata endpoint URL."""
     if identifier:
         encoded = urllib.parse.quote(
-            _normalize_identifier(identifier), safe=""
+            normalize_identifier(identifier), safe=""
         )
         return f"{config.host}/metadata?identifier={encoded}"
     return f"{config.host}/metadata"
@@ -153,11 +153,29 @@ def _request_with_retry(
     )
 
 
-def _normalize_identifier(identifier: str | list) -> str | list:
-    """Normalize identifier path(s) to a single leading forward slash"""
+def normalize_identifier(identifier: str | list) -> str | list:
+    """Canonicalize identifier path(s) to a single leading slash.
+
+    Collapses empty (``//``) and ``.`` segments and resolves ``..``, so
+    ``/./a``, ``a//b`` and ``x/../y`` become ``/a``, ``/a/b`` and ``/y``.
+    A trailing slash is preserved, since prefix queries distinguish
+    ``/foo/`` (children of foo) from ``/foo``.
+    """
     if isinstance(identifier, list):
-        return [_normalize_identifier(i) for i in identifier]
-    return "/" + identifier.lstrip("/")
+        return [normalize_identifier(i) for i in identifier]
+    segments: list[str] = []
+    for segment in identifier.split("/"):
+        if segment in ("", "."):
+            continue
+        if segment == "..":
+            if segments:
+                segments.pop()
+            continue
+        segments.append(segment)
+    normalized = "/" + "/".join(segments)
+    if identifier.endswith("/") and normalized != "/":
+        normalized += "/"
+    return normalized
 
 
 # === Utility Functions ===
@@ -264,7 +282,7 @@ def tus_ingest_file(
     # File-identity metadata travels in the TUS Upload-Metadata, so it is
     # captured once on POST initialization and persisted by the server.
     metadata = {
-        "filename": _normalize_identifier(identifier=identifier),
+        "filename": normalize_identifier(identifier=identifier),
         "X-TAPEST-Checksum": checksum,
         "X-TAPEST-Created": created,
         "X-TAPEST-Modified": modified,
@@ -481,7 +499,7 @@ def extract_file_with_metadata(
     )
     if next_identifier:
         headers["X-TAPEST-Next-File"] = urllib.parse.quote(
-            _normalize_identifier(next_identifier), safe=""
+            normalize_identifier(next_identifier), safe=""
         )
 
     verify_ssl = _verify_param(config)
@@ -634,7 +652,7 @@ def retrieve_metadata(
     if query:
         for target_field in ("prefixes", "identifiers"):
             if query.get(target_field):
-                query[target_field] = _normalize_identifier(
+                query[target_field] = normalize_identifier(
                     query[target_field]
                 )
 

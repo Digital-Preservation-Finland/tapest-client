@@ -10,6 +10,7 @@ from .config import Config, get_config
 
 from .client import (
     TapestClientError,
+    normalize_identifier,
     generate_checksum,
     is_same_file,
     cleanup_file,
@@ -31,6 +32,7 @@ __all__ = [
     "Config",
     "get_config",
     "TapestClientError",
+    "normalize_identifier",
     "generate_checksum",
     "is_same_file",
     "cleanup_file",
