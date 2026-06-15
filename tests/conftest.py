@@ -32,7 +32,7 @@ def pytest_runtest_setup(item):
 
 CLIENT_CONFIG_DEFAULT = Config(
     token="tok123",
-    host="https://ice.example.com",
+    host="https://tapest.example.com",
     storage_account_name="testaccount",
     max_retry_attempts=2,
     default_sleep_duration=0,

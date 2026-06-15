@@ -100,9 +100,9 @@ def _build_headers(
     headers = {"Authorization": f"Bearer {config.token}"}
     effective_account = account_name or config.storage_account_name
     if effective_account:
-        headers["X-ICE-Account"] = effective_account
+        headers["X-TAPEST-Account"] = effective_account
     if storage_name:
-        headers["X-ICE-Storage"] = storage_name
+        headers["X-TAPEST-Storage"] = storage_name
     if extra:
         headers.update(extra)
     return headers
@@ -236,7 +236,7 @@ def tus_ingest_file(
     :param checksum: Pre-given checksum so that checksum calculation
         can be given during this function's call.
     :param storage_name: Storage name to upload to.
-    :param account_name: Per-call override for ``X-ICE-Account``.
+    :param account_name: Per-call override for ``X-TAPEST-Account``.
         Falls back to ``config.storage_account_name`` if unset.
     :param chunk_size: Size of chunks to send as part of TUS upload.
     """
@@ -255,7 +255,7 @@ def tus_ingest_file(
         config=config,
         storage_name=storage_name,
         extra={
-            "X-ICE-Size": str(stat.st_size),
+            "X-TAPEST-Size": str(stat.st_size),
         },
         account_name=account_name,
     )
@@ -265,9 +265,9 @@ def tus_ingest_file(
     # captured once on POST initialization and persisted by the server.
     metadata = {
         "filename": _normalize_identifier(identifier=identifier),
-        "X-ICE-Checksum": checksum,
-        "X-ICE-Created": created,
-        "X-ICE-Modified": modified,
+        "X-TAPEST-Checksum": checksum,
+        "X-TAPEST-Created": created,
+        "X-TAPEST-Modified": modified,
     }
     storage_path = user_state_path("tapest-client") / "tus_storage"
     # Platformdirs 2.5.4 version does not support "ensure_exists"
@@ -318,7 +318,7 @@ def ingest_file(
         can be given during this function's call.
     :param raise_for_status: Boolean whether requests-call response should
         try to raise an exception.
-    :param account_name: Per-call override for ``X-ICE-Account``.
+    :param account_name: Per-call override for ``X-TAPEST-Account``.
         Falls back to ``config.storage_account_name`` if unset.
     """
     path = Path(local_file_pathname)
@@ -337,10 +337,10 @@ def ingest_file(
         config,
         storage_name,
         {
-            "X-ICE-Size": str(stat.st_size),
-            "X-ICE-Checksum": checksum,
-            "X-ICE-Created": created,
-            "X-ICE-Modified": modified,
+            "X-TAPEST-Size": str(stat.st_size),
+            "X-TAPEST-Checksum": checksum,
+            "X-TAPEST-Created": created,
+            "X-TAPEST-Modified": modified,
         },
         account_name=account_name,
     )
@@ -399,11 +399,11 @@ def recache_file(
         config,
         storage_name,
         {
-            "X-ICE-Size": str(file_metadata["size"]),
-            "X-ICE-Checksum": file_metadata["checksum"],
-            "X-ICE-Created": file_metadata["created"],
-            "X-ICE-Modified": file_metadata["modified"],
-            "X-ICE-Recache": "true",
+            "X-TAPEST-Size": str(file_metadata["size"]),
+            "X-TAPEST-Checksum": file_metadata["checksum"],
+            "X-TAPEST-Created": file_metadata["created"],
+            "X-TAPEST-Modified": file_metadata["modified"],
+            "X-TAPEST-Recache": "true",
         },
         account_name=account_name,
     )
@@ -480,7 +480,7 @@ def extract_file_with_metadata(
         account_name=account_name,
     )
     if next_identifier:
-        headers["X-ICE-Next-File"] = urllib.parse.quote(
+        headers["X-TAPEST-Next-File"] = urllib.parse.quote(
             _normalize_identifier(next_identifier), safe=""
         )
 

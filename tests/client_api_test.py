@@ -65,12 +65,12 @@ def test_ingest_http_error(tmp_path, config_fx, requests_fx):
 
 
 def test_ingest_storage_name_header(tmp_path, config_fx, requests_fx):
-    """Storage name is sent as X-ICE-Storage header."""
+    """Storage name is sent as X-TAPEST-Storage header."""
     path = tmp_path / "file.dat"
     path.write_bytes(b"data")
     requests_fx.responses["put"] = mock_response(201, json_data=SAMPLE_METADATA)
     ingest_file(config_fx(), "/id", str(path), storage_name="tape-01")
-    assert requests_fx.calls["put"]["headers"]["X-ICE-Storage"] == "tape-01"
+    assert requests_fx.calls["put"]["headers"]["X-TAPEST-Storage"] == "tape-01"
 
 
 # === recache_file ===
@@ -191,13 +191,13 @@ def test_extract_with_metadata_http_error_cleans_up(tmp_path, config_fx, request
 
 
 def test_extract_with_metadata_next_identifier(tmp_path, config_fx, requests_fx):
-    """next_identifier is sent as X-ICE-Next-File header for prefetch."""
+    """next_identifier is sent as X-TAPEST-Next-File header for prefetch."""
     dest = tmp_path / "out.dat"
     requests_fx.responses["get"] = _download_response()
     extract_file_with_metadata(
         config_fx(), SAMPLE_METADATA, str(dest), next_identifier="/next"
     )
-    assert "X-ICE-Next-File" in requests_fx.calls["get"]["headers"]
+    assert "X-TAPEST-Next-File" in requests_fx.calls["get"]["headers"]
 
 
 def test_extract_with_metadata_creates_parent_dirs(tmp_path, config_fx, requests_fx):
@@ -391,7 +391,7 @@ def test_extract_directory_next_identifier(tmp_path, config_fx, requests_fx):
     meta2 = {**SAMPLE_METADATA, "identifier": "/pkg/b.dat"}
     requests_fx.responses["get"] = _download_response()
     extract_files_to_directory(config_fx(), [meta1, meta2], str(tmp_path))
-    assert "X-ICE-Next-File" in requests_fx.all_calls["get"][0]["headers"]
+    assert "X-TAPEST-Next-File" in requests_fx.all_calls["get"][0]["headers"]
 
 
 def test_extract_directory_force_skips_matching(tmp_path, config_fx):

@@ -181,8 +181,8 @@ def test_headers_all_options(config_fx):
     cfg = config_fx()
     headers = _build_headers(cfg, storage_name="s1", extra={"X-Custom": "val"})
     assert headers["Authorization"] == f"Bearer {cfg.token}"
-    assert headers["X-ICE-Account"] == cfg.storage_account_name
-    assert headers["X-ICE-Storage"] == "s1"
+    assert headers["X-TAPEST-Account"] == cfg.storage_account_name
+    assert headers["X-TAPEST-Storage"] == "s1"
     assert headers["X-Custom"] == "val"
 
 
@@ -190,7 +190,7 @@ def test_headers_account_name_overrides_config(config_fx):
     """Per-call account_name takes precedence over config.storage_account_name."""
     cfg = config_fx(storage_account_name="ida")
     headers = _build_headers(cfg, account_name="kuvi")
-    assert headers["X-ICE-Account"] == "kuvi"
+    assert headers["X-TAPEST-Account"] == "kuvi"
 
 
 def test_headers_account_name_when_config_unset(config_fx):
@@ -201,14 +201,14 @@ def test_headers_account_name_when_config_unset(config_fx):
     """
     cfg = config_fx(storage_account_name="")
     headers = _build_headers(cfg, account_name="ida")
-    assert headers["X-ICE-Account"] == "ida"
+    assert headers["X-TAPEST-Account"] == "ida"
 
 
 def test_headers_no_account_when_both_unset(config_fx):
-    """No X-ICE-Account header when neither config nor argument set it."""
+    """No X-TAPEST-Account header when neither config nor argument set it."""
     cfg = config_fx(storage_account_name="")
     headers = _build_headers(cfg)
-    assert "X-ICE-Account" not in headers
+    assert "X-TAPEST-Account" not in headers
 
 
 # === _file_url / _metadata_url ===
