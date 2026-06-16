@@ -144,15 +144,22 @@ tapest-client delete FILE_ID [--storage NAME]
 tapest-client query-metadata [FILE_ID] [options]
 ```
 
-| Flag           | Description                         |
-|----------------|-------------------------------------|
-| `--prefix`     | File identifier prefix (repeatable) |
-| `--identifier` | File identifier (repeatable)        |
-| `--storage`    | Storage name                        |
-| `--limit`      | Limit number of results             |
-| `--pending`    | Pending files only                  |
-| `--errors`     | Files with errors only              |
-| `--order`      | Order by field                      |
+| Flag           | Description                                      |
+|----------------|--------------------------------------------------|
+| `--prefix`     | File identifier prefix (repeatable)              |
+| `--regex`      | File identifier regex pattern (repeatable)       |
+| `--identifier` | File identifier (repeatable)                     |
+| `--storage`    | Storage name                                     |
+| `--limit`      | Limit number of results                          |
+| `--pending`    | Pending files only                               |
+| `--errors`     | Files with errors only                           |
+| `--order`      | Order by field                                   |
+
+`--regex` matches file identifiers against a regular expression (MongoDB
+`$regex` / PCRE-ish syntax), complementary to `--prefix`. Patterns are applied
+**unanchored** — use `^`/`$` to anchor. Matching is always scoped to your own
+account; a pattern can never reach another account's files. Quote patterns to
+keep the shell from expanding metacharacters.
 
 Examples:
 
@@ -160,6 +167,7 @@ Examples:
 tapest-client query-metadata /path/to/identifier
 tapest-client query-metadata --pending
 tapest-client query-metadata --prefix /prefix --limit 100
+tapest-client query-metadata --regex '/2022/.*\.dat$'
 ```
 
 ### Update metadata

@@ -229,6 +229,13 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_argument(
         "--errors", action="store_true", help="files with errors only"
     )
+    sub.add_argument(
+        "--regex",
+        action="append",
+        default=None,
+        help="file identifier regex pattern (repeatable), "
+        "complementary to --prefix",
+    )
     sub.add_argument("--order", choices=METADATA_ORDER_CHOICES, default=None)
     sub.add_argument("--limit", type=int, default=None)
     sub.set_defaults(func=_run_query_metadata)
@@ -438,6 +445,8 @@ def _build_query(args: argparse.Namespace) -> dict:
     query = {}
     if getattr(args, "prefix", None):
         query["prefixes"] = args.prefix
+    if getattr(args, "regex", None):
+        query["regexes"] = args.regex
     if getattr(args, "identifier", None):
         query["identifiers"] = args.identifier
     if getattr(args, "pending", False):

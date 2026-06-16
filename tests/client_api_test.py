@@ -245,6 +245,16 @@ def test_retrieve_metadata_default_query(config_fx, requests_fx):
     assert requests_fx.calls["post"]["json"] == {}
 
 
+def test_retrieve_metadata_regexes_not_normalized(config_fx, requests_fx):
+    """Regex patterns are sent verbatim, not leading-slash normalized like
+    prefixes/identifiers."""
+    requests_fx.responses["post"] = mock_response(200, json_data=[])
+    retrieve_metadata(config_fx(), query={"regexes": [r"2022/.*\.dat$"]})
+    assert requests_fx.calls["post"]["json"] == {
+        "regexes": [r"2022/.*\.dat$"]
+    }
+
+
 def test_retrieve_status_success(config_fx, requests_fx):
     """Successful status check returns status dict."""
     requests_fx.responses["get"] = mock_response(200, json_data={"status": "ok"})

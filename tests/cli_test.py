@@ -28,6 +28,7 @@ def _metadata_args(**overrides):
     defaults = dict(
         file_id=None,
         prefix=None,
+        regex=None,
         identifier=None,
         storage=None,
         pending=False,
@@ -106,6 +107,20 @@ def test_metadata_query_params():
     assert args.pending is True
     assert args.order == "ingested"
     assert args.limit == 10
+
+
+def test_metadata_query_parses_regex():
+    """query-metadata parses repeatable --regex patterns."""
+    args = build_parser().parse_args(
+        [
+            "query-metadata",
+            "--regex",
+            r"/2022/.*\.dat$",
+            "--regex",
+            "Experiment_1[0-9]/",
+        ]
+    )
+    assert args.regex == [r"/2022/.*\.dat$", "Experiment_1[0-9]/"]
 
 
 def test_ingest_many_parses_options():
@@ -216,6 +231,24 @@ def test_metadata_query_builds_correct_body(config_fx, cli_fx, capsys):
                     "order_by": "ingested",
                     "limit": 10,
                 },
+                "storage_name": None,
+            },
+        )
+    ]
+
+
+def test_metadata_query_builds_regex_body(config_fx, cli_fx, capsys):
+    """query-metadata passes --regex through verbatim as the regexes field."""
+    cli_fx("retrieve_metadata", return_value={"metadata": []})
+    _run_query_metadata(
+        config_fx(),
+        _metadata_args(regex=[r"/2022/.*\.dat$"]),
+    )
+    assert cli_fx.calls["retrieve_metadata"] == [
+        (
+            (),
+            {
+                "query": {"regexes": [r"/2022/.*\.dat$"]},
                 "storage_name": None,
             },
         )
