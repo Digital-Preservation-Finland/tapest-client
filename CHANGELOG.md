@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 0.0.9 - 2026-06-23
+
+### Changed
+- **Breaking:** Protocol metadata headers renamed from `X-ICE-*` to `X-TAPEST-*` (`X-TAPEST-Account`, `X-TAPEST-Checksum`, `X-TAPEST-Created`, `X-TAPEST-Modified`, `X-TAPEST-Size`, `X-TAPEST-Storage`, `X-TAPEST-Recache`, `X-TAPEST-Next-File`). Requires a TapeSt API that accepts the `X-TAPEST-*` names; servers expecting the old `X-ICE-*` headers are no longer compatible, so client and API must be upgraded together.
+
+### Fixed
+- `ingest-many .` no longer fails with `422 Invalid value for query parameter identifier`. Passing `.` (or a trailing-slash path) previously produced identifiers containing a `/./` segment. Identifier normalization is now centralized in `normalize_identifier`, which collapses `.` and `//`, resolves `..`, and preserves a trailing slash for prefix queries; `ingest-one`, `ingest-many`, and `tus-ingest-one` all route through it, and the per-command ad-hoc slash fixups were removed.
+- TUS uploads now persist file-identity metadata (checksum, created, modified). These values are sent in the TUS `Upload-Metadata` at POST initialization, so they are captured once at upload start and retained by the server through finalize, instead of relying on per-request headers that did not persist across the chunked upload.
+
 ## 0.0.8 - 2026-05-27
 
 ### Added
