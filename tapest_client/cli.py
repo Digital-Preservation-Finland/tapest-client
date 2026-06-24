@@ -236,6 +236,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="file identifier regex pattern (repeatable), "
         "complementary to --prefix",
     )
+    sub.add_argument(
+        "--parent",
+        default=None,
+        metavar="PATH",
+        help="list one directory level under PATH (immediate files plus "
+        "child directories) instead of the full recursive subtree",
+    )
     sub.add_argument("--order", choices=METADATA_ORDER_CHOICES, default=None)
     sub.add_argument("--limit", type=int, default=None)
     sub.set_defaults(func=_run_query_metadata)
@@ -449,6 +456,8 @@ def _build_query(args: argparse.Namespace) -> dict:
         query["regexes"] = args.regex
     if getattr(args, "identifier", None):
         query["identifiers"] = args.identifier
+    if getattr(args, "parent", None) is not None:
+        query["parent"] = args.parent
     if getattr(args, "pending", False):
         query["pending_only"] = True
     if getattr(args, "errors", False):

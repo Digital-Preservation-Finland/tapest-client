@@ -148,6 +148,7 @@ tapest-client query-metadata [FILE_ID] [options]
 |----------------|--------------------------------------------------|
 | `--prefix`     | File identifier prefix (repeatable)              |
 | `--regex`      | File identifier regex pattern (repeatable)       |
+| `--parent`     | List one directory level under PATH              |
 | `--identifier` | File identifier (repeatable)                     |
 | `--storage`    | Storage name                                     |
 | `--limit`      | Limit number of results                          |
@@ -161,6 +162,13 @@ tapest-client query-metadata [FILE_ID] [options]
 account; a pattern can never reach another account's files. Quote patterns to
 keep the shell from expanding metacharacters.
 
+`--parent PATH` lists a single directory level under PATH (like `ls`) instead
+of the full recursive subtree (like `ls -R`). The returned `metadata` holds the
+files lying directly in the directory, and the immediate child directories are
+reported separately as `commonPrefixes` - each ending in `/`, ready to feed back
+as the next `--parent` for interactive browsing. An empty path or `/` lists the
+root, and a trailing slash is optional.
+
 Examples:
 
 ```
@@ -168,6 +176,7 @@ tapest-client query-metadata /path/to/identifier
 tapest-client query-metadata --pending
 tapest-client query-metadata --prefix /prefix --limit 100
 tapest-client query-metadata --regex '/2022/.*\.dat$'
+tapest-client query-metadata --parent /200182/2022/
 ```
 
 ### Update metadata

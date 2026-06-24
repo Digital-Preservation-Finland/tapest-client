@@ -30,6 +30,7 @@ def _metadata_args(**overrides):
         prefix=None,
         regex=None,
         identifier=None,
+        parent=None,
         storage=None,
         pending=False,
         errors=False,
@@ -121,6 +122,17 @@ def test_metadata_query_parses_regex():
         ]
     )
     assert args.regex == [r"/2022/.*\.dat$", "Experiment_1[0-9]/"]
+
+
+def test_metadata_query_parses_parent():
+    """query-metadata parses --parent as a path (defaulting to None)."""
+    args = build_parser().parse_args(
+        ["query-metadata", "--parent", "/dir/"]
+    )
+    assert args.parent == "/dir/"
+
+    default = build_parser().parse_args(["query-metadata"])
+    assert default.parent is None
 
 
 def test_ingest_many_parses_options():
@@ -249,6 +261,24 @@ def test_metadata_query_builds_regex_body(config_fx, cli_fx, capsys):
             (),
             {
                 "query": {"regexes": [r"/2022/.*\.dat$"]},
+                "storage_name": None,
+            },
+        )
+    ]
+
+
+def test_metadata_query_builds_parent_body(config_fx, cli_fx, capsys):
+    """query-metadata puts the --parent path in the query."""
+    cli_fx("retrieve_metadata", return_value={"metadata": []})
+    _run_query_metadata(
+        config_fx(),
+        _metadata_args(parent="/dir/"),
+    )
+    assert cli_fx.calls["retrieve_metadata"] == [
+        (
+            (),
+            {
+                "query": {"parent": "/dir/"},
                 "storage_name": None,
             },
         )
