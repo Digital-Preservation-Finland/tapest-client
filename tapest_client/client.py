@@ -45,6 +45,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import time
 import urllib.parse
@@ -58,6 +59,7 @@ from platformdirs import user_state_path
 import requests
 from requests.exceptions import HTTPError
 from tusclient import client as tus_client
+from tusclient.exceptions import TusCommunicationError
 from tusclient.storage import filestorage
 
 from tapest_client.config import Config
@@ -300,7 +302,22 @@ def tus_ingest_file(
         url_storage=storage,
         verify_tls_cert=_verify_param(config),
     )
-    uploader.upload()
+    # A 409 with the identical-duplicate marker is an idempotent success.
+    try:
+        uploader.upload()
+    except TusCommunicationError as error:
+        if error.status_code == 409:
+            try:
+                body = json.loads(error.response_content or b"{}")
+            except ValueError:
+                body = {}
+            if body.get("error") != "identical_duplicate":
+                raise TapestClientError(
+                    f"A different file already exists for identifier "
+                    f"{identifier}"
+                ) from error
+        else:
+            raise
     return retrieve_file_metadata(
         config=config,
         identifier=identifier,
@@ -375,6 +392,15 @@ def ingest_file(
     )
     if response.status_code == 201:
         return response.json()
+    # A 409 with the identical-duplicate marker is an idempotent success.
+    if response.status_code == 409:
+        try:
+            body = response.json()
+        except ValueError:
+            body = {}
+        if body.get("error") == "identical_duplicate":
+            # Idempotent success: return the existing file's metadata.
+            return body.get("metadata") or body
     if raise_for_status:
         response.raise_for_status()
     raise TapestClientError(

@@ -64,6 +64,36 @@ def test_ingest_http_error(tmp_path, config_fx, requests_fx):
         ingest_file(config_fx(), "/pkg/file.dat", str(path))
 
 
+def test_ingest_identical_duplicate_returns_metadata(
+    tmp_path, config_fx, requests_fx
+):
+    """A 409 carrying the identical_duplicate marker is an idempotent success:
+    ingest_file returns the body rather than raising."""
+    path = tmp_path / "file.dat"
+    path.write_bytes(b"hello world")
+    body = {
+        "detail": "An identical file already exists",
+        "error": "identical_duplicate",
+        "metadata": SAMPLE_METADATA,
+    }
+    requests_fx.responses["put"] = mock_response(409, json_data=body)
+    result = ingest_file(config_fx(), "/pkg/file.dat", str(path))
+    assert result == SAMPLE_METADATA
+
+
+def test_ingest_conflict_without_marker_raises(
+    tmp_path, config_fx, requests_fx
+):
+    """A 409 for a different file (no marker) is a genuine conflict and raises."""
+    path = tmp_path / "file.dat"
+    path.write_bytes(b"hello world")
+    requests_fx.responses["put"] = mock_response(
+        409, json_data={"detail": "A file already exists"}
+    )
+    with pytest.raises(TapestClientError, match="409"):
+        ingest_file(config_fx(), "/pkg/file.dat", str(path))
+
+
 def test_ingest_storage_name_header(tmp_path, config_fx, requests_fx):
     """Storage name is sent as X-TAPEST-Storage header."""
     path = tmp_path / "file.dat"
