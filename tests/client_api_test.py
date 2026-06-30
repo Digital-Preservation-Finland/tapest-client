@@ -36,7 +36,22 @@ SAMPLE_METADATA = {
     ),
     "created": "2025-01-01T00:00:00Z",
     "modified": "2025-06-01T12:00:00Z",
+    # New wire shape: flat requested-copy view ("storage") plus the full
+    # per-copy map.
     "storage": "tape-01",
+    "copies": {
+        "tape-cache": {
+            "ingested": "2025-01-01T00:00:00Z",
+            "stored": "2025-01-01T00:00:00Z",
+            "checked": "2025-01-01T00:00:00Z",
+        },
+        "tape-01": {
+            "ingested": "2025-01-01T00:00:00Z",
+            "stored": "2025-06-01T12:00:00Z",
+            "checked": "2025-06-01T12:00:00Z",
+            "storage_metadata": {"volume": "VOL001"},
+        },
+    },
 }
 
 

@@ -8,7 +8,10 @@ import pytest
 from tapest_client.cli import (
     build_parser,
     main,
+    METADATA_ORDER_CHOICES,
+    COPY_ORDER_FIELDS,
     _load_config,
+    _print_metadata_table,
     _run_status,
     _run_write_config,
     _run_ingest,
@@ -36,6 +39,7 @@ def _metadata_args(**overrides):
         errors=False,
         order=None,
         limit=None,
+        format="json",
     )
     defaults.update(overrides)
     return SimpleNamespace(**defaults)
@@ -229,6 +233,7 @@ def test_metadata_query_builds_correct_body(config_fx, cli_fx, capsys):
             identifier=["id1"],
             pending=True,
             order="ingested",
+            storage="kaj_lt9",
             limit=10,
         ),
     )
@@ -243,7 +248,7 @@ def test_metadata_query_builds_correct_body(config_fx, cli_fx, capsys):
                     "order_by": "ingested",
                     "limit": 10,
                 },
-                "storage_name": None,
+                "storage_name": "kaj_lt9",
             },
         )
     ]
@@ -283,6 +288,78 @@ def test_metadata_query_builds_parent_body(config_fx, cli_fx, capsys):
             },
         )
     ]
+
+
+def test_metadata_order_choices_synced():
+    """Order choices match the server's accepted set: 'queued' present,
+    obsolete 'required' gone."""
+    assert "queued" in METADATA_ORDER_CHOICES
+    assert "required" not in METADATA_ORDER_CHOICES
+    assert set(METADATA_ORDER_CHOICES) == {
+        "identifier", "storage", "ingested", "stored",
+        "checked", "recached", "extracted", "queued",
+    }
+
+
+def test_query_metadata_copy_order_requires_storage(config_fx, cli_fx):
+    """Ordering by a per-copy field without --storage exits 2 before any
+    request is issued."""
+    cli_fx("retrieve_metadata", return_value={"metadata": []})
+    for field in sorted(COPY_ORDER_FIELDS):
+        with pytest.raises(SystemExit) as exc:
+            _run_query_metadata(config_fx(), _metadata_args(order=field))
+        assert exc.value.code == 2
+    assert cli_fx.calls["retrieve_metadata"] == []
+
+
+def test_query_metadata_copy_order_with_storage_ok(config_fx, cli_fx):
+    """A per-copy order field passes the guard when --storage is given."""
+    cli_fx("retrieve_metadata", return_value={"metadata": []})
+    _run_query_metadata(
+        config_fx(), _metadata_args(order="stored", storage="kaj_lt9")
+    )
+    assert cli_fx.calls["retrieve_metadata"][0][1]["storage_name"] == "kaj_lt9"
+
+
+def test_query_metadata_storage_order_no_storage_ok(config_fx, cli_fx):
+    """order=storage (tape-layout ordering) is allowed without --storage."""
+    cli_fx("retrieve_metadata", return_value={"metadata": []})
+    _run_query_metadata(config_fx(), _metadata_args(order="storage"))
+    assert cli_fx.calls["retrieve_metadata"][0][1]["query"][
+        "order_by"
+    ] == "storage"
+
+
+def test_query_metadata_table_format(config_fx, cli_fx, capsys):
+    """--format table renders a per-file copies summary."""
+    cli_fx(
+        "retrieve_metadata",
+        return_value={
+            "files": 1, "filesPending": 1, "filesWithErrors": 0,
+            "metadata": [
+                {
+                    "identifier": "/p/a.dat", "size": 123,
+                    "copies": {
+                        "tape-cache": {"ingested": "t"},
+                        "kaj_lt9": {"ingested": "t", "stored": "t",
+                                    "checked": "t"},
+                    },
+                }
+            ],
+        },
+    )
+    _run_query_metadata(config_fx(), _metadata_args(format="table"))
+    out = capsys.readouterr().out
+    assert "/p/a.dat" in out
+    assert "kaj_lt9" in out and "tape-cache" in out
+    assert "storage" in out  # column header
+    assert "1 files, 1 pending" in out
+
+
+def test_print_metadata_table_split_falls_back_to_json(capsys):
+    """Split results (metadata is None) fall back to JSON output."""
+    _print_metadata_table({"metadata": None, "metadataSplits": [[]]})
+    assert json.loads(capsys.readouterr().out)["metadata"] is None
 
 
 def test_update_metadata(config_fx, cli_fx, capsys):

@@ -65,10 +65,14 @@ METADATA_ORDER_CHOICES = [
     "ingested",
     "stored",
     "checked",
-    "required",
     "recached",
     "extracted",
+    "queued",
 ]
+
+# Per-copy order fields: meaningful only when scoped to one storage
+# (X-TAPEST-Storage). The aggregate view has no per-copy column to sort on.
+COPY_ORDER_FIELDS = {"ingested", "stored", "checked", "queued", "extracted"}
 
 
 # -- Parser construction -----------------------------------------------------
@@ -245,6 +249,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
     sub.add_argument("--order", choices=METADATA_ORDER_CHOICES, default=None)
     sub.add_argument("--limit", type=int, default=None)
+    sub.add_argument(
+        "--format",
+        choices=["json", "table"],
+        default="json",
+        help="output format; 'table' renders a per-file copies summary "
+        "(split results always print as json)",
+    )
     sub.set_defaults(func=_run_query_metadata)
 
     # update-metadata
@@ -342,6 +353,60 @@ def _load_config(args: argparse.Namespace) -> Config:
 def _print_json(data: object) -> None:
     """Print data as formatted JSON to stdout."""
     print(json.dumps(data, indent=2))
+
+
+# Per-copy timestamp fields shown (as presence marks) in the table view.
+_COPY_MARKS = ("ingested", "stored", "checked", "queued", "required",
+               "extracted")
+
+
+def _print_metadata_table(result: dict) -> None:
+    """Render a per-file, per-copy summary table to stdout.
+
+    Falls back to JSON for split results (``metadata`` is None) or any shape
+    without a flat metadata list. Accepts either a query envelope (with a
+    ``metadata`` list) or a single file document.
+    """
+    if "metadata" in result:
+        items = result.get("metadata")
+        if items is None:
+            _print_json(result)
+            return
+    else:
+        items = [result]
+    if not items:
+        print("0 files")
+        return
+
+    for item in items:
+        header = f"{item.get('identifier', '?')}  ({item.get('size', '')} B)"
+        if item.get("recached"):
+            header += f"  recached={item['recached']}"
+        print(header)
+        copies = item.get("copies") or {}
+        if not copies:
+            print("  (no copies)")
+            continue
+        name_w = max(len("storage"), *(len(n) for n in copies))
+        cols = "  ".join(f"{m[:4]:>4}" for m in _COPY_MARKS)
+        print(f"  {'storage':<{name_w}}  {cols}  errs")
+        for name, copy in sorted(copies.items()):
+            marks = "  ".join(
+                f"{'✓' if copy.get(m) else '·':>4}" for m in _COPY_MARKS
+            )
+            errs = len(copy.get("errors") or [])
+            sm = copy.get("storage_metadata")
+            sm_str = (
+                f"  {json.dumps(sm, separators=(',', ':'))}" if sm else ""
+            )
+            print(f"  {name:<{name_w}}  {marks}  {errs:>4}{sm_str}")
+
+    if "files" in result:
+        print(
+            f"\n{result.get('files', len(items))} files, "
+            f"{result.get('filesPending', 0)} pending, "
+            f"{result.get('filesWithErrors', 0)} with errors"
+        )
 
 
 # -- Subcommand handlers -----------------------------------------------------
@@ -471,6 +536,13 @@ def _build_query(args: argparse.Namespace) -> dict:
 
 def _run_query_metadata(config: Config, args: argparse.Namespace) -> None:
     """Query file metadata for a single file or by filter."""
+    if args.order in COPY_ORDER_FIELDS and not args.storage:
+        logger.error(
+            "--order %s requires --storage NAME (per-copy field; the "
+            "aggregate view cannot order by it)",
+            args.order,
+        )
+        sys.exit(2)
     if args.file_id:
         logger.info(
             "Retrieving metadata for file with identifier '%s' ...",
@@ -488,7 +560,10 @@ def _run_query_metadata(config: Config, args: argparse.Namespace) -> None:
         result = tapest_client.retrieve_metadata(
             config, query=query, storage_name=args.storage
         )
-    _print_json(result)
+    if getattr(args, "format", "json") == "table":
+        _print_metadata_table(result)
+    else:
+        _print_json(result)
 
 
 def _run_update_metadata(config: Config, args: argparse.Namespace) -> None:
