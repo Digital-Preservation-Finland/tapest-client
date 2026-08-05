@@ -117,7 +117,6 @@ def build_parser() -> argparse.ArgumentParser:
     )
     sub.add_argument("file_id", metavar="FILE_ID")
     sub.add_argument("local_path", metavar="LOCAL_PATH")
-    sub.add_argument("--storage", default=None)
     sub.set_defaults(func=_run_ingest)
 
     # tus-ingest-one
@@ -126,7 +125,6 @@ def build_parser() -> argparse.ArgumentParser:
     )
     sub.add_argument("file_id", metavar="FILE_ID")
     sub.add_argument("local_path", metavar="LOCAL_PATH")
-    sub.add_argument("--storage", default=None)
     sub.add_argument("--chunk_size", default="16 MiB")
     sub.set_defaults(func=run_tus_ingest)
 
@@ -168,7 +166,6 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_argument(
         "next_file_id", metavar="NEXT_FILE_ID", nargs="?", default=None
     )
-    sub.add_argument("--storage", default=None)
     sub.set_defaults(func=_run_extract)
 
     # extract-many
@@ -199,7 +196,6 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="overwrite files that already exist",
     )
-    sub.add_argument("--storage", default=None)
     sub.set_defaults(func=_run_extract_files)
 
     # delete
@@ -207,7 +203,6 @@ def build_parser() -> argparse.ArgumentParser:
         "delete", help="Delete a single file and its metadata from the service"
     )
     sub.add_argument("file_id", metavar="FILE_ID")
-    sub.add_argument("--storage", default=None)
     sub.set_defaults(func=_run_delete)
 
     # query-metadata
@@ -445,7 +440,7 @@ def _run_ingest(config: Config, args: argparse.Namespace) -> None:
         args.file_id,
     )
     result = tapest_client.ingest_file(
-        config, args.file_id, args.local_path, storage_name=args.storage
+        config, args.file_id, args.local_path
     )
     _print_json(result)
     logger.info(
@@ -472,7 +467,6 @@ def run_tus_ingest(config: Config, args: argparse.Namespace) -> None:
         config=config,
         identifier=args.file_id,
         path=args.local_path,
-        storage_name=args.storage,
         chunk_size=args.chunk_size,
     )
     _print_json(result)
@@ -496,7 +490,6 @@ def _run_extract(config: Config, args: argparse.Namespace) -> None:
         args.file_id,
         args.local_path,
         next_identifier=args.next_file_id,
-        storage_name=args.storage,
     )
     _print_json(result)
     logger.info(
@@ -510,7 +503,7 @@ def _run_extract(config: Config, args: argparse.Namespace) -> None:
 def _run_delete(config: Config, args: argparse.Namespace) -> None:
     """Delete a file."""
     logger.info("Deleting file with identifier '%s' ...", args.file_id)
-    tapest_client.delete_file(config, args.file_id, storage_name=args.storage)
+    tapest_client.delete_file(config, args.file_id)
     logger.info("Successfully deleted file with identifier '%s'", args.file_id)
 
 
@@ -551,7 +544,7 @@ def _run_query_metadata(config: Config, args: argparse.Namespace) -> None:
             args.file_id,
         )
         result = tapest_client.retrieve_file_metadata(
-            config, args.file_id, storage_name=args.storage
+            config, args.file_id
         )
     else:
         logger.info(
@@ -643,9 +636,7 @@ def _run_extract_files(config: Config, args: argparse.Namespace) -> None:
 
     query = _build_query(args)
     logger.info("Retrieving metadata for files to extract ...")
-    metadata_result = tapest_client.retrieve_metadata(
-        config, query=query, storage_name=args.storage
-    )
+    metadata_result = tapest_client.retrieve_metadata(config, query=query)
     metadata_list = metadata_result.get("metadata", [])
 
     if not metadata_list:
@@ -663,7 +654,6 @@ def _run_extract_files(config: Config, args: argparse.Namespace) -> None:
         args.local_dir,
         skip=args.skip,
         force=args.force,
-        storage_name=args.storage,
     )
     _print_json(results)
     logger.info(

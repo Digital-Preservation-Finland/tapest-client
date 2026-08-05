@@ -74,8 +74,6 @@ def test_ingest_parses_all_options():
             "--host",
             "https://h",
             "ingest-one",
-            "--storage",
-            "tape-1",
             "/id",
             "/path",
         ]
@@ -85,7 +83,6 @@ def test_ingest_parses_all_options():
     assert args.host == "https://h"
     assert args.file_id == "/id"
     assert args.local_path == "/path"
-    assert args.storage == "tape-1"
 
 
 def test_metadata_query_params():
@@ -175,40 +172,40 @@ def test_status(config_fx, cli_fx, capsys):
 
 
 def test_ingest_calls_library(config_fx, cli_fx, capsys):
-    """ingest-one passes file_id, path, and storage_name to library."""
+    """ingest-one passes file_id and path to library."""
     cli_fx("ingest_file", return_value={"identifier": "/id", "size": 100})
-    args = SimpleNamespace(file_id="/id", local_path="/path", storage=None)
+    args = SimpleNamespace(file_id="/id", local_path="/path")
     _run_ingest(config_fx(), args)
-    assert cli_fx.calls["ingest_file"] == [(("/id", "/path"), {"storage_name": None})]
+    assert cli_fx.calls["ingest_file"] == [(("/id", "/path"), {})]
     assert json.loads(capsys.readouterr().out)["identifier"] == "/id"
 
 
 def test_ingest_normalizes_leading_slash(config_fx, cli_fx):
     """ingest-one prepends a leading '/' if the user omits it."""
     cli_fx("ingest_file", return_value={"identifier": "/id"})
-    args = SimpleNamespace(file_id="id", local_path="/path", storage=None)
+    args = SimpleNamespace(file_id="id", local_path="/path")
     _run_ingest(config_fx(), args)
-    assert cli_fx.calls["ingest_file"] == [(("/id", "/path"), {"storage_name": None})]
+    assert cli_fx.calls["ingest_file"] == [(("/id", "/path"), {})]
 
 
 def test_extract_calls_library(config_fx, cli_fx):
-    """extract-one passes file_id, path, next_identifier, and storage_name."""
+    """extract-one passes file_id, path, and next_identifier."""
     cli_fx("extract_file", return_value={"identifier": "/id"})
     args = SimpleNamespace(
-        file_id="/id", local_path="/path", next_file_id=None, storage=None
+        file_id="/id", local_path="/path", next_file_id=None
     )
     _run_extract(config_fx(), args)
     assert cli_fx.calls["extract_file"] == [
-        (("/id", "/path"), {"next_identifier": None, "storage_name": None})
+        (("/id", "/path"), {"next_identifier": None})
     ]
 
 
 def test_delete_calls_library(config_fx, cli_fx):
-    """delete passes file_id and storage_name to library."""
+    """delete passes file_id to library."""
     cli_fx("delete_file")
-    args = SimpleNamespace(file_id="/id", storage=None)
+    args = SimpleNamespace(file_id="/id")
     _run_delete(config_fx(), args)
-    assert cli_fx.calls["delete_file"] == [(("/id",), {"storage_name": None})]
+    assert cli_fx.calls["delete_file"] == [(("/id",), {})]
 
 
 # -- Metadata modes -----------------------------------------------------------
@@ -219,7 +216,7 @@ def test_metadata_retrieve_single(config_fx, cli_fx, capsys):
     cli_fx("retrieve_file_metadata", return_value={"identifier": "/id"})
     _run_query_metadata(config_fx(), _metadata_args(file_id="/id"))
     assert cli_fx.calls["retrieve_file_metadata"] == [
-        (("/id",), {"storage_name": None})
+        (("/id",), {})
     ]
 
 
@@ -544,7 +541,6 @@ def test_extract_files(config_fx, cli_fx, capsys):
         identifier=None,
         skip=False,
         force=False,
-        storage=None,
     )
     _run_extract_files(config_fx(), args)
 
@@ -557,7 +553,6 @@ def test_extract_files_requires_source(config_fx):
         identifier=None,
         skip=False,
         force=False,
-        storage=None,
     )
     with pytest.raises(SystemExit):
         _run_extract_files(config_fx(), args)
@@ -619,7 +614,6 @@ def test_tus_upload(tmp_path, config_fx):
     args = SimpleNamespace(
         file_id=identifier,
         local_path=str(path),
-        storage=None,
         chunk_size="16 MiB",
     )
     run_tus_ingest(config=config, args=args)

@@ -255,7 +255,6 @@ def tus_ingest_file(
     config: Config,
     identifier: str,
     path: str,
-    storage_name: str | None = None,
     checksum: str | None = None,
     account_name: str | None = None,
     chunk_size: str = "16 MiB",
@@ -267,7 +266,6 @@ def tus_ingest_file(
     :param path: local file URI.
     :param checksum: Pre-given checksum so that checksum calculation
         can be given during this function's call.
-    :param storage_name: Storage name to upload to.
     :param account_name: Per-call override for ``X-TAPEST-Account``.
         Falls back to ``config.storage_account_name`` if unset.
     :param chunk_size: Size of chunks to send as part of TUS upload.
@@ -285,7 +283,6 @@ def tus_ingest_file(
     )
     headers = _build_headers(
         config=config,
-        storage_name=storage_name,
         extra={
             "X-TAPEST-Size": str(stat.st_size),
         },
@@ -333,7 +330,6 @@ def tus_ingest_file(
     return retrieve_file_metadata(
         config=config,
         identifier=identifier,
-        storage_name=storage_name,
         account_name=account_name,
     )
 
@@ -342,7 +338,6 @@ def ingest_file(
     config: Config,
     identifier: str,
     local_file_pathname: str,
-    storage_name: str | None = None,
     checksum: str | None = None,
     raise_for_status: bool = False,
     account_name: str | None = None,
@@ -360,7 +355,6 @@ def ingest_file(
     :param config: Config instance.
     :param identifier: File identifier.
     :param local_file_pathname: Local file URI.
-    :param storage_name: Storage name to upload to.
     :param checksum: Pre-given checksum so that checksum calculation
         can be given during this function's call.
     :param raise_for_status: Boolean whether requests-call response should
@@ -382,8 +376,7 @@ def ingest_file(
     url = _file_url(config, identifier)
     headers = _build_headers(
         config,
-        storage_name,
-        {
+        extra={
             "X-TAPEST-Size": str(stat.st_size),
             "X-TAPEST-Checksum": checksum,
             "X-TAPEST-Created": created,
@@ -425,7 +418,6 @@ def recache_file(
     config: Config,
     identifier: str,
     local_file_pathname: str,
-    storage_name: str | None = None,
     account_name: str | None = None,
 ) -> dict:
     """Re-upload a cached file, verifying it matches.
@@ -453,8 +445,7 @@ def recache_file(
     url = _file_url(config, identifier)
     headers = _build_headers(
         config,
-        storage_name,
-        {
+        extra={
             "X-TAPEST-Size": str(file_metadata["size"]),
             "X-TAPEST-Checksum": file_metadata["checksum"],
             "X-TAPEST-Created": file_metadata["created"],
@@ -487,7 +478,6 @@ def extract_file(
     identifier: str,
     local_file_pathname: str,
     next_identifier: str | None = None,
-    storage_name: str | None = None,
     account_name: str | None = None,
 ) -> dict:
     """Extract a file by identifier to a local path.
@@ -495,14 +485,13 @@ def extract_file(
     See :func:`ingest_file` for the semantics of ``account_name``.
     """
     file_metadata = retrieve_file_metadata(
-        config, identifier, storage_name, account_name=account_name
+        config, identifier, account_name=account_name
     )
     return extract_file_with_metadata(
         config,
         file_metadata,
         local_file_pathname,
         next_identifier,
-        storage_name,
         account_name=account_name,
     )
 
@@ -512,7 +501,6 @@ def extract_file_with_metadata(
     file_metadata: dict,
     local_file_pathname: str,
     next_identifier: str | None = None,
-    storage_name: str | None = None,
     account_name: str | None = None,
 ) -> dict:
     """Extract a file using provided metadata to a local path.
@@ -530,11 +518,7 @@ def extract_file_with_metadata(
 
     identifier = file_metadata["identifier"]
     url = _file_url(config, identifier)
-    headers = _build_headers(
-        config,
-        storage_name or file_metadata.get("storage"),
-        account_name=account_name,
-    )
+    headers = _build_headers(config, account_name=account_name)
     if next_identifier:
         headers["X-TAPEST-Next-File"] = urllib.parse.quote(
             normalize_identifier(next_identifier), safe=""
@@ -608,7 +592,6 @@ def extract_file_with_metadata(
 def delete_file(
     config: Config,
     identifier: str,
-    storage_name: str | None = None,
     account_name: str | None = None,
 ) -> None:
     """Delete a file by identifier.
@@ -616,7 +599,7 @@ def delete_file(
     See :func:`ingest_file` for the semantics of ``account_name``.
     """
     url = _file_url(config, identifier)
-    headers = _build_headers(config, storage_name, account_name=account_name)
+    headers = _build_headers(config, account_name=account_name)
     verify_ssl = _verify_param(config)
     response = requests.delete(url, headers=headers, verify=verify_ssl)
     if response.status_code == 204:
@@ -630,7 +613,6 @@ def delete_file(
 def retrieve_file_metadata(
     config: Config,
     identifier: str,
-    storage_name: str | None = None,
     account_name: str | None = None,
 ) -> dict:
     """Retrieve metadata for a single file.
@@ -638,7 +620,7 @@ def retrieve_file_metadata(
     See :func:`ingest_file` for the semantics of ``account_name``.
     """
     url = _metadata_url(config, identifier)
-    headers = _build_headers(config, storage_name, account_name=account_name)
+    headers = _build_headers(config, account_name=account_name)
     verify_ssl = _verify_param(config)
     response = requests.get(url, headers=headers, verify=verify_ssl)
     if response.status_code == 200:
@@ -813,7 +795,6 @@ def extract_files_to_directory(
     local_directory_pathname: str,
     skip: bool = False,
     force: bool = False,
-    storage_name: str | None = None,
     account_name: str | None = None,
 ) -> list[dict]:
     """Extract files described in metadata list to a directory tree.
@@ -841,7 +822,6 @@ def extract_files_to_directory(
                     file_metadata,
                     str(path),
                     next_id,
-                    storage_name,
                     account_name=account_name,
                 )
             )
@@ -863,7 +843,6 @@ def extract_files_to_directory(
                     file_metadata,
                     str(path),
                     next_id,
-                    storage_name,
                     account_name=account_name,
                 )
             )

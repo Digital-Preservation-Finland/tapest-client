@@ -36,10 +36,8 @@ SAMPLE_METADATA = {
     ),
     "created": "2025-01-01T00:00:00Z",
     "modified": "2025-06-01T12:00:00Z",
-    # New wire shape: flat requested-copy view ("storage") plus the full
-    # per-copy map. ``ingested`` is file-level (document root).
+    # Full model: file-level root fields plus the per-copy map.
     "ingested": "2025-01-01T00:00:00Z",
-    "storage": "tape-01",
     "copies": {
         "tape-cache": {
             "stored": "2025-01-01T00:00:00Z",
@@ -108,15 +106,6 @@ def test_ingest_conflict_without_marker_raises(
     )
     with pytest.raises(TapestClientError, match="409"):
         ingest_file(config_fx(), "/pkg/file.dat", str(path))
-
-
-def test_ingest_storage_name_header(tmp_path, config_fx, requests_fx):
-    """Storage name is sent as X-TAPEST-Storage header."""
-    path = tmp_path / "file.dat"
-    path.write_bytes(b"data")
-    requests_fx.responses["put"] = mock_response(201, json_data=SAMPLE_METADATA)
-    ingest_file(config_fx(), "/id", str(path), storage_name="tape-01")
-    assert requests_fx.calls["put"]["headers"]["X-TAPEST-Storage"] == "tape-01"
 
 
 # === recache_file ===
