@@ -330,6 +330,15 @@ def test_query_metadata_storage_order_no_storage_ok(config_fx, cli_fx):
     ] == "storage"
 
 
+def test_query_metadata_ingested_order_no_storage_ok(config_fx, cli_fx):
+    """order=ingested (file-level) is allowed without --storage."""
+    cli_fx("retrieve_metadata", return_value={"metadata": []})
+    _run_query_metadata(config_fx(), _metadata_args(order="ingested"))
+    assert cli_fx.calls["retrieve_metadata"][0][1]["query"][
+        "order_by"
+    ] == "ingested"
+
+
 def test_query_metadata_table_format(config_fx, cli_fx, capsys):
     """--format table renders a per-file copies summary."""
     cli_fx(
@@ -338,11 +347,10 @@ def test_query_metadata_table_format(config_fx, cli_fx, capsys):
             "files": 1, "filesPending": 1, "filesWithErrors": 0,
             "metadata": [
                 {
-                    "identifier": "/p/a.dat", "size": 123,
+                    "identifier": "/p/a.dat", "size": 123, "ingested": "t",
                     "copies": {
-                        "tape-cache": {"ingested": "t"},
-                        "kaj_lt9": {"ingested": "t", "stored": "t",
-                                    "checked": "t"},
+                        "tape-cache": {},
+                        "kaj_lt9": {"stored": "t", "checked": "t"},
                     },
                 }
             ],
@@ -351,6 +359,7 @@ def test_query_metadata_table_format(config_fx, cli_fx, capsys):
     _run_query_metadata(config_fx(), _metadata_args(format="table"))
     out = capsys.readouterr().out
     assert "/p/a.dat" in out
+    assert "ingested=t" in out  # file-level, on the header line
     assert "kaj_lt9" in out and "tape-cache" in out
     assert "storage" in out  # column header
     assert "1 files, 1 pending" in out

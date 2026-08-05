@@ -72,7 +72,8 @@ METADATA_ORDER_CHOICES = [
 
 # Per-copy order fields: meaningful only when scoped to one storage
 # (X-TAPEST-Storage). The aggregate view has no per-copy column to sort on.
-COPY_ORDER_FIELDS = {"ingested", "stored", "checked", "queued", "extracted"}
+# ``ingested`` is file-level (document root) and orderable without --storage.
+COPY_ORDER_FIELDS = {"stored", "checked", "queued", "extracted"}
 
 
 # -- Parser construction -----------------------------------------------------
@@ -356,8 +357,7 @@ def _print_json(data: object) -> None:
 
 
 # Per-copy timestamp fields shown (as presence marks) in the table view.
-_COPY_MARKS = ("ingested", "stored", "checked", "queued", "required",
-               "extracted")
+_COPY_MARKS = ("stored", "checked", "queued", "required", "extracted")
 
 
 def _print_metadata_table(result: dict) -> None:
@@ -380,6 +380,8 @@ def _print_metadata_table(result: dict) -> None:
 
     for item in items:
         header = f"{item.get('identifier', '?')}  ({item.get('size', '')} B)"
+        if item.get("ingested"):
+            header += f"  ingested={item['ingested']}"
         if item.get("recached"):
             header += f"  recached={item['recached']}"
         print(header)
