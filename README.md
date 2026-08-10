@@ -238,16 +238,18 @@ pytest
 
 ### Benchmarks
 
-SHA-256 buffer size benchmark using pytest-benchmark:
+SHA-256 buffer size benchmark using pytest-benchmark. `--run-slow` is
+required; without it the benchmarks are skipped and the run reports
+success having measured nothing:
 
 ```
-pytest benchmarks/test_benchmark_checksum.py --benchmark-enable -v
+pytest tests/benchmark --run-slow --benchmark-enable -v
 ```
 
 To benchmark on a specific directory (e.g. GlusterFS):
 
 ```
-BENCHMARK_DIR=/mnt/cache_vol/tapest pytest benchmarks/test_benchmark_checksum.py --benchmark-enable -v
+BENCHMARK_DIR=/mnt/cache_vol/tapest pytest tests/benchmark --run-slow --benchmark-enable -v
 ```
 
 ## Releasing
