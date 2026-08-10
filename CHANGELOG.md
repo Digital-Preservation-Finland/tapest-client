@@ -5,6 +5,39 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 0.0.10 - 2026-08-10
+
+### Added
+- `query-metadata --parent PATH` lists one directory level below PATH. This
+  is the same operation as `ls`. Before, the client could list only all the
+  levels below a prefix. That is the same operation as `ls -R`. The `metadata`
+  field of the response has the files that are directly in the directory. The
+  `commonPrefixes` field has the child directories. Each child directory ends
+  with `/`, thus you can use it as the next `--parent` value. An empty path or
+  `/` lists the root. The final slash is optional. Use this option to examine
+  an account one level at a time. A full list can have millions of entries.
+  The TapeSt API must accept the `parent` query field.
+- `query-metadata --regex PATTERN` compares the identifiers with a regular
+  expression. You can give the option more than one time. You can use it
+  together with `--prefix`. The pattern is not anchored, thus use `^` and `$`
+  to anchor it. The client compares only the files of your own account. The
+  TapeSt API must accept the `regexes` query field.
+
+### Changed
+- An ingest of a file that is already stored with the same content is now a
+  success. Before, the client reported an error. `ingest_file` returns the
+  metadata of the stored file. `tus_ingest_file` completes without an error.
+  This applies when the API answers with 409 and the `identical_duplicate`
+  marker. If the content is different, the client still raises an error. Thus
+  a repeated ingest is safe. This is necessary for a caller that does a batch
+  again after a partial failure. The TapeSt API must send the marker. An older
+  API sends a 409 without the marker, and the client then raises an error.
+
+### Fixed
+- The benchmark command in the README used a path that does not exist. The
+  file has a different name now. The command also did not have `--run-slow`.
+  Thus pytest skipped all 12 benchmarks, but the run showed success.
+
 ## 0.0.9 - 2026-06-23
 
 ### Changed
