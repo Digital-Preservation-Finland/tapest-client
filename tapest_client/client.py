@@ -236,6 +236,18 @@ def parse_chunk_size(chunk_size: str) -> int:
     return int(chunk_size_in_bytes)
 
 
+def _tus_storage_path(identifier: str) -> Path:
+    """Return the resume-state file for one upload.
+
+    One file per identifier. A shared file fails two ways: tuspy keys
+    records on file content alone, so identical content collides, and
+    the store rewrites the whole file per write, so parallel uploads
+    corrupt it.
+    """
+    digest = hashlib.sha256(identifier.encode("utf-8")).hexdigest()[:32]
+    return user_state_path("tapest-client") / "tus_storage.d" / digest
+
+
 # === Core Operation Functions ===
 
 
@@ -289,7 +301,7 @@ def tus_ingest_file(
         "X-TAPEST-Created": created,
         "X-TAPEST-Modified": modified,
     }
-    storage_path = user_state_path("tapest-client") / "tus_storage"
+    storage_path = _tus_storage_path(metadata["filename"])
     # Platformdirs 2.5.4 version does not support "ensure_exists"
     # so this is a workaround for it.
     storage_path.parent.mkdir(parents=True, exist_ok=True)

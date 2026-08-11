@@ -5,9 +5,11 @@ batch) sends correct requests and handles success, error, and 202 retry
 responses. All HTTP calls are mocked via the ``requests_fx`` fixture.
 """
 
+
 import pytest
 import requests_mock
 from tapest_client.client import (
+    _tus_storage_path,
     TapestClientError,
     ingest_file,
     recache_file,
@@ -488,3 +490,34 @@ def test_tus_upload(tmp_path, config_fx):
         path=str(path),
         chunk_size="16.12 MiB",
     )
+
+
+# === TUS resume-state files ===
+
+
+def test_two_identifiers_get_separate_state_files():
+    """Two identifiers must not share a resume-state file."""
+    assert _tus_storage_path("/a.dat") != _tus_storage_path("/b.dat")
+
+
+def test_same_identifier_gets_the_same_state_file():
+    """Resuming an interrupted upload must find its stored URL."""
+    assert _tus_storage_path("/a.dat") == _tus_storage_path("/a.dat")
+
+
+def test_state_file_name_is_filesystem_safe():
+    """Identifiers hold slashes and arbitrary characters."""
+    name = _tus_storage_path("/deep/path/with spaces/and:colons.dat").name
+    assert "/" not in name and name.isalnum()
+
+
+@pytest.mark.usefixtures("mock_tus_endpoints")
+def test_tus_upload_of_same_file_under_two_identifiers(tmp_path, config_fx):
+    """Two uploads of one local file under two identifiers both succeed."""
+    path = tmp_path / "same.dat"
+    path.write_bytes(b"the very same bytes")
+    config = config_fx()
+    for identifier in ("/dup/first.dat", "/dup/second.dat"):
+        tus_ingest_file(
+            config=config, identifier=identifier, path=str(path)
+        )
