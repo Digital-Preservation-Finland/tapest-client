@@ -10,6 +10,7 @@ from base64 import b64encode
 
 import pytest
 import requests_mock
+from tapest_client import client
 from tapest_client.client import (
     _tus_storage_path,
     TapestClientError,
@@ -25,7 +26,7 @@ from tapest_client.client import (
     ingest_files,
     extract_files_to_directory,
     generate_checksum,
-    tus_ingest_file,
+    _tus_upload_file,
 )
 
 from tests.conftest import mock_response
@@ -527,7 +528,7 @@ def test_tus_upload(tmp_path, config_fx):
     path.write_bytes(b"my test file")
     identifier = "this/is/my/test/file.dat"
     config = config_fx()
-    tus_ingest_file(
+    _tus_upload_file(
         config=config,
         identifier=identifier,
         path=str(path),
@@ -561,6 +562,93 @@ def test_tus_upload_of_same_file_under_two_identifiers(tmp_path, config_fx):
     path.write_bytes(b"the very same bytes")
     config = config_fx()
     for identifier in ("/dup/first.dat", "/dup/second.dat"):
-        tus_ingest_file(
+        _tus_upload_file(
             config=config, identifier=identifier, path=str(path)
         )
+
+
+# === Automatic selection of the upload path ===
+
+
+@pytest.mark.usefixtures("mock_tus_endpoints")
+def test_ingest_file_uses_tus_when_the_file_is_larger_than_the_limit(
+    tmp_path, config_fx, monkeypatch
+):
+    """A file that is larger than the limit of the service goes to TUS."""
+    path = tmp_path / "big.dat"
+    path.write_bytes(b"x" * 100)
+    used = {}
+
+    def fake_tus(**kwargs):
+        used["tus"] = True
+        return {"ok": True}
+
+    client._UPLOAD_LIMIT_CACHE.clear()
+    monkeypatch.setattr(client, "_max_put_bytes", lambda config: 10)
+    monkeypatch.setattr(client, "_tus_upload_file", fake_tus)
+    result = client.ingest_file(config_fx(), "/big.dat", str(path))
+    assert used.get("tus") is True
+    assert result == {"ok": True}
+
+
+def test_ingest_file_uses_put_when_the_file_is_smaller_than_the_limit(
+    tmp_path, config_fx, monkeypatch, requests_fx
+):
+    """A file that is smaller than the limit uses PUT."""
+    path = tmp_path / "small.dat"
+    path.write_bytes(b"x" * 5)
+    requests_fx.responses["put"] = mock_response(
+        201, json_data=SAMPLE_METADATA
+    )
+
+    def fail_tus(**kwargs):
+        raise AssertionError("TUS must not be used")
+
+    monkeypatch.setattr(client, "_max_put_bytes", lambda config: 1000)
+    monkeypatch.setattr(client, "_tus_upload_file", fail_tus)
+    client.ingest_file(config_fx(), "/small.dat", str(path))
+    assert requests_fx.calls["put"] is not None
+
+
+@pytest.mark.usefixtures("mock_tus_endpoints")
+def test_tus_upload_uses_the_chunk_size_of_the_configuration(
+    tmp_path, config_fx, monkeypatch
+):
+    """A TUS upload uses tus_chunk_size when the caller gives no value."""
+    path = tmp_path / "file.dat"
+    path.write_bytes(b"my test file")
+    config = config_fx()
+    config.tus_chunk_size = "500 MiB"
+    seen = {}
+    real = client.parse_chunk_size
+
+    def spy(chunk_size):
+        seen["chunk_size"] = chunk_size
+        return real(chunk_size=chunk_size)
+
+    monkeypatch.setattr(client, "parse_chunk_size", spy)
+    client._tus_upload_file(
+        config=config, identifier="/file.dat", path=str(path)
+    )
+    assert seen["chunk_size"] == "500 MiB"
+
+
+def test_max_put_bytes_uses_the_limit_of_the_service(config_fx, monkeypatch):
+    """The limit comes from the status of the service."""
+    client._UPLOAD_LIMIT_CACHE.clear()
+    monkeypatch.setattr(
+        client, "retrieve_status",
+        lambda config: {"max_non_tus_upload_bytes": 4242},
+    )
+    assert client._max_put_bytes(config_fx()) == 4242
+
+
+def test_max_put_bytes_assumes_a_limit_when_the_service_gives_none(
+    config_fx, monkeypatch
+):
+    """An older service gives no limit, thus the client assumes one."""
+    client._UPLOAD_LIMIT_CACHE.clear()
+    monkeypatch.setattr(client, "retrieve_status", lambda config: {})
+    assert client._max_put_bytes(config_fx()) == (
+        client._ASSUMED_MAX_PUT_BYTES
+    )

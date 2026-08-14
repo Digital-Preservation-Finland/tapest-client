@@ -86,6 +86,8 @@ class Config:
     cleanup_on_fail: bool = False
     verify_ssl: bool = True
     ca_cert_path: str = ""
+    # Size of one chunk of a TUS upload, e.g. "16 MiB" or "500 MiB".
+    tus_chunk_size: str = "16 MiB"
 
     def read(self, config_file: str = CONFIG_FILE) -> None:
         """Load configuration from file and environment variables.

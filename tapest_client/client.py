@@ -258,7 +258,7 @@ def _tus_upload(
     size: int,
     metadata: dict,
     account_name: str | None,
-    chunk_size: str,
+    chunk_size: str | None,
 ) -> dict:
     """Upload ``path`` to the TUS endpoint and return the file's metadata.
 
@@ -271,9 +271,12 @@ def _tus_upload(
     :param size: File size in bytes.
     :param metadata: TUS Upload-Metadata dict.
     :param account_name: Per-call override for ``X-TAPEST-Account``.
-    :param chunk_size: TUS chunk size.
+    :param chunk_size: TUS chunk size. Falls back to ``config.tus_chunk_size``
+        if unset.
     """
-    chunk_size_in_bytes = parse_chunk_size(chunk_size=chunk_size)
+    chunk_size_in_bytes = parse_chunk_size(
+        chunk_size=chunk_size or config.tus_chunk_size
+    )
     tus_client_obj = tus_client.TusClient(url=f"{config.host}/tus")
     headers = _build_headers(
         config=config,
@@ -321,13 +324,13 @@ def _tus_upload(
     )
 
 
-def tus_ingest_file(
+def _tus_upload_file(
     config: Config,
     identifier: str,
     path: str,
     checksum: str | None = None,
     account_name: str | None = None,
-    chunk_size: str = "16 MiB",
+    chunk_size: str | None = None,
 ):
     """Ingest a local file via TUS endpoint.
 
@@ -339,6 +342,7 @@ def tus_ingest_file(
     :param account_name: Per-call override for ``X-TAPEST-Account``.
         Falls back to ``config.storage_account_name`` if unset.
     :param chunk_size: Size of chunks to send as part of TUS upload.
+        Falls back to ``config.tus_chunk_size`` if unset.
     """
     stat = Path(path).stat()
     if checksum is None:
@@ -366,6 +370,30 @@ def tus_ingest_file(
         account_name=account_name,
         chunk_size=chunk_size,
     )
+
+
+# Fallback limit for a service that does not report one; it matches the
+# service default. Guessing low is safe: the file just takes the TUS path,
+# which works at any size. Probing with a PUT is not, since requests sends
+# the whole body before the 413 comes back.
+_ASSUMED_MAX_PUT_BYTES = 1 << 30  # 1 GiB
+
+_UPLOAD_LIMIT_CACHE: dict[str, int] = {}
+
+
+def _max_put_bytes(config: Config) -> int:
+    """Return the largest body that PUT /file accepts.
+
+    Read from the service status once per host, falling back to
+    ``_ASSUMED_MAX_PUT_BYTES``.
+    """
+    if config.host not in _UPLOAD_LIMIT_CACHE:
+        try:
+            limit = retrieve_status(config).get("max_non_tus_upload_bytes")
+        except TapestClientError:
+            limit = None
+        _UPLOAD_LIMIT_CACHE[config.host] = limit or _ASSUMED_MAX_PUT_BYTES
+    return _UPLOAD_LIMIT_CACHE[config.host]
 
 
 def ingest_file(
@@ -400,6 +428,16 @@ def ingest_file(
     stat = path.stat()
     if checksum is None:
         checksum = generate_checksum(local_file_pathname=path)
+
+    # Files over the PUT limit go to the TUS endpoint instead.
+    if stat.st_size > _max_put_bytes(config):
+        return _tus_upload_file(
+            config=config,
+            identifier=identifier,
+            path=local_file_pathname,
+            checksum=checksum,
+            account_name=account_name,
+        )
     created = datetime.fromtimestamp(stat.st_ctime, timezone.utc).strftime(
         TIMESTAMP_FORMAT
     )
@@ -440,6 +478,15 @@ def ingest_file(
         if body.get("error") == "identical_duplicate":
             # Idempotent success: return the existing file's metadata.
             return body.get("metadata") or body
+    # The service refused the body as too large; retry over TUS.
+    if response.status_code == 413:
+        return _tus_upload_file(
+            config=config,
+            identifier=identifier,
+            path=local_file_pathname,
+            checksum=checksum,
+            account_name=account_name,
+        )
     if raise_for_status:
         response.raise_for_status()
     raise TapestClientError(
@@ -454,7 +501,7 @@ def recache_file(
     local_file_pathname: str,
     account_name: str | None = None,
     use_tus: bool = True,
-    chunk_size: str = "16 MiB",
+    chunk_size: str | None = None,
 ) -> dict:
     """Re-upload a cached file, verifying it matches.
 
@@ -464,7 +511,9 @@ def recache_file(
     See :func:`ingest_file` for the semantics of ``account_name``.
 
     :param use_tus: Upload over TUS (default) or a single PUT when False.
-    :param chunk_size: TUS chunk size; ignored when ``use_tus`` is False.
+    :param chunk_size: TUS chunk size; falls back to
+        ``config.tus_chunk_size`` if unset. Ignored when ``use_tus`` is
+        False.
     """
     path = Path(local_file_pathname)
     file_metadata = retrieve_file_metadata(

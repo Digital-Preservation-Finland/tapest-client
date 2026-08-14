@@ -91,51 +91,59 @@ For per-command help, use `tapest-client <command> --help`.
 | `--config`  | Configuration file             |
 | `--host`    | API host URL                   |
 
+The TUS upload uses the chunk size of `tus_chunk_size` in the configuration
+file. The default is `16 MiB`. A large chunk can give more speed on a fast
+network.
+
 ### Ingest (upload)
 
 ```
-tapest-client ingest-one FILE_ID LOCAL_PATH [--storage NAME]
-tapest-client tus-ingest-one FILE_ID LOCAL_PATH [--storage NAME] [--chunk_size "128 MiB"]
-tapest-client ingest-many PATH [PATH ...] [--prefix PFX] [--skip] [--force]
+tapest-client ingest PATH [PATH ...] [--identifier ID] [--prefix PFX] [--skip] [--force]
 ```
 
-`ingest-many` accepts any mix of file paths and directory paths. Each
-file's identifier is derived from the path as given; directories are
-walked recursively and each contained file's identifier extends the
-directory path with its relative location. `--prefix` is prepended to
-every derived identifier.
+`ingest` accepts any mix of file paths and directory paths. Each file's
+identifier is derived from the path as given; directories are walked
+recursively and each contained file's identifier extends the directory
+path with its relative location. `--prefix` is prepended to every derived
+identifier.
 
-`tus-ingest-one` behaves the same as `ingest-one` with small difference that
-it'll utilize resumable upload protocol endpoint. Client can also adjust
-the chunk size to be optimal for themselves.
+`--identifier` gives the identifier of one file, thus the identifier and
+the local path can be different. It accepts exactly one PATH.
 
 Examples:
 
 ```
-tapest-client ingest-one /path/to/identifier /local/file.dat
-tapest-client tus-ingest-one /path/to/identifier /local/file.dat --chunk_size "512 MiB"
-tapest-client ingest-many 2024/q1/*.dat 2024/q2/*.dat
-tapest-client ingest-many --prefix acme some_dir extra-file.dat --skip
+tapest-client ingest 2024/q1/*.dat 2024/q2/*.dat
+tapest-client ingest --prefix acme some_dir extra-file.dat --skip
+tapest-client ingest --identifier /path/to/identifier /local/file.dat
 ```
 
 ### Extract (download)
 
 ```
-tapest-client extract-one FILE_ID LOCAL_PATH [--storage NAME]
-tapest-client extract-many LOCAL_DIR --prefix PFX [--skip] [--force] [--storage NAME]
+tapest-client extract FILE_ID [FILE_ID ...] DEST [--next FILE_ID] [--skip] [--force]
+tapest-client extract --prefix PFX DEST [--skip] [--force]
 ```
+
+The last argument is the destination. It is a file when one identifier is
+given and the destination is not a directory that exists. In each other
+case it is a directory.
+
+`--next` gives the identifier of the file to read next. The service uses
+it for the order of the tape.
 
 Examples:
 
 ```
-tapest-client extract-one /path/to/identifier /local/output.dat
-tapest-client extract-many /local/dir --prefix /data --skip
+tapest-client extract /path/to/identifier /local/output.dat
+tapest-client extract /data/a.dat /data/b.dat /local/dir
+tapest-client extract --prefix /data /local/dir --skip
 ```
 
 ### Delete
 
 ```
-tapest-client delete FILE_ID [--storage NAME]
+tapest-client delete FILE_ID [FILE_ID ...]
 ```
 
 ### Query metadata

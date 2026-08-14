@@ -1,141 +1,186 @@
 # Changelog
 
-All notable changes to this project will be documented in this file.
+All notable changes to this project are in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
-and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## 0.0.11 - 2026-08-18
+
+### Changed
+- **Breaking:** Each command accepts one file or many files. Thus the commands
+  `ingest-one`, `ingest-many`, `extract-one` and `extract-many` are removed.
+  Use `ingest PATH...` and `extract FILE_ID... DEST`. The command `delete`
+  accepts more than one identifier. The old names give an error.
+- `ingest` selects the upload path by the size of the file. A file that is
+  larger than the limit of the API goes to the TUS endpoint. The client reads
+  the limit one time for each host from the `max_non_tus_upload_bytes` field of
+  the status. If the status does not have the field, the client uses 1 GiB.
+  Thus you no longer select the path.
+- `extract` uses the method of the command `cp`. The last argument is the
+  destination. It is a file when you give one identifier and the destination is
+  not a directory that exists. In each other case it is a directory.
+- The next identifier for the order of the tape is now the option `--next`.
+
+### Added
+- `ingest --identifier ID PATH` gives the identifier of one file. Use it when
+  the identifier and the local path are different.
+- The configuration field `tus_chunk_size` gives the size of one chunk of a TUS
+  upload, for example `"16 MiB"` or `"500 MiB"`. The default is 16 MiB. The
+  environment value `TAPEST_CLIENT_TUS_CHUNK_SIZE` gives the same result.
+
+### Removed
+- **Breaking:** The command `tus-ingest-one`. The command `ingest` selects the
+  TUS path automatically.
 
 ## 0.0.10 - 2026-08-10
 
 ### Added
-- `query-metadata --parent PATH` lists one directory level below PATH. This
-  is the same operation as `ls`. Before, the client could list only all the
-  levels below a prefix. That is the same operation as `ls -R`. The `metadata`
-  field of the response has the files that are directly in the directory. The
-  `commonPrefixes` field has the child directories. Each child directory ends
-  with `/`, thus you can use it as the next `--parent` value. An empty path or
-  `/` lists the root. The final slash is optional. Use this option to examine
-  an account one level at a time. A full list can have millions of entries.
-  The TapeSt API must accept the `parent` query field.
+- `query-metadata --parent PATH` lists one level below PATH. This is the same
+  operation as `ls`. Before, the client listed all the levels below a prefix,
+  which is the same operation as `ls -R`. The `metadata` field of the response
+  has the files that are directly in the directory. The `commonPrefixes` field
+  has the child directories. Each child directory ends with `/`, thus you can
+  use it as the next `--parent` value. An empty path or `/` lists the root. Use
+  this option to examine a large account one level at a time. The API must
+  accept the `parent` query field.
 - `query-metadata --regex PATTERN` compares the identifiers with a regular
-  expression. You can give the option more than one time. You can use it
-  together with `--prefix`. The pattern is not anchored, thus use `^` and `$`
-  to anchor it. The client compares only the files of your own account. The
-  TapeSt API must accept the `regexes` query field.
+  expression. You can give the option more than one time, and together with
+  `--prefix`. The pattern is not anchored, thus use `^` and `$` to anchor it.
+  The client compares only the files of your own account. The API must accept
+  the `regexes` query field.
 
 ### Changed
 - An ingest of a file that is already stored with the same content is now a
-  success. Before, the client reported an error. `ingest_file` returns the
-  metadata of the stored file. `tus_ingest_file` completes without an error.
-  This applies when the API answers with 409 and the `identical_duplicate`
-  marker. If the content is different, the client still raises an error. Thus
-  a repeated ingest is safe. This is necessary for a caller that does a batch
-  again after a partial failure. The TapeSt API must send the marker. An older
-  API sends a 409 without the marker, and the client then raises an error.
+  success. Before, the client gave an error. `ingest_file` returns the metadata
+  of the stored file. Thus a repeated ingest is safe after a partial failure.
+  If the content is different, the client gives an error. The API must send the
+  `identical_duplicate` marker with the answer 409. An older API sends 409
+  without the marker, and the client then gives an error.
 
 ### Fixed
-- The benchmark command in the README used a path that does not exist. The
-  file has a different name now. The command also did not have `--run-slow`.
-  Thus pytest skipped all 12 benchmarks, but the run showed success.
+- The benchmark command in the README used a path that does not exist, and it
+  did not have `--run-slow`. Thus pytest skipped all 12 benchmarks and showed a
+  success.
 
 ## 0.0.9 - 2026-06-23
 
 ### Changed
-- **Breaking:** Protocol metadata headers renamed from `X-ICE-*` to `X-TAPEST-*` (`X-TAPEST-Account`, `X-TAPEST-Checksum`, `X-TAPEST-Created`, `X-TAPEST-Modified`, `X-TAPEST-Size`, `X-TAPEST-Storage`, `X-TAPEST-Recache`, `X-TAPEST-Next-File`). Requires a TapeSt API that accepts the `X-TAPEST-*` names; servers expecting the old `X-ICE-*` headers are no longer compatible, so client and API must be upgraded together.
+- **Breaking:** The protocol headers `X-ICE-*` are now `X-TAPEST-*`. The client
+  and the API must change together. An API that expects the old names is not
+  compatible.
 
 ### Fixed
-- `ingest-many .` no longer fails with `422 Invalid value for query parameter identifier`. Passing `.` (or a trailing-slash path) previously produced identifiers containing a `/./` segment. Identifier normalization is now centralized in `normalize_identifier`, which collapses `.` and `//`, resolves `..`, and preserves a trailing slash for prefix queries; `ingest-one`, `ingest-many`, and `tus-ingest-one` all route through it, and the per-command ad-hoc slash fixups were removed.
-- TUS uploads now persist file-identity metadata (checksum, created, modified). These values are sent in the TUS `Upload-Metadata` at POST initialization, so they are captured once at upload start and retained by the server through finalize, instead of relying on per-request headers that did not persist across the chunked upload.
+- `ingest-many .` no longer gives the error `422 Invalid value for query
+  parameter identifier`. A path of `.` or a path with a final slash made an
+  identifier with a `/./` part. The function `normalize_identifier` now does
+  all of the normalization. It collapses `.` and `//`, resolves `..`, and keeps
+  a final slash for a prefix query.
+- A TUS upload keeps the checksum, the created time and the modified time. The
+  client sends these values in `Upload-Metadata` at the start of the upload.
+  Before, the client sent them in headers, which the chunked upload did not
+  keep.
 
 ## 0.0.8 - 2026-05-27
 
 ### Added
-- TUS resumable upload support via the `tus-ingest-one` CLI command.
+- TUS resumable upload with the command `tus-ingest-one`.
 
 ### Changed
-- `--force` (ingest and extract) now treats a file whose checksum already matches the server copy as a no-op instead of replacing it.
+- `--force` on ingest and extract does nothing when the checksum of the file is
+  the same as the checksum of the copy on the service. Before, it replaced the
+  file.
 
 ### Fixed
-- `tus_ingest_file` now honors `config.verify_ssl` / `ca_cert_path`. Previously the TUS upload always verified TLS, which broke uploads to a `verify_ssl=False` or privately-signed (CA) endpoint even though every other call honored the setting.
+- `tus_ingest_file` obeys `config.verify_ssl` and `ca_cert_path`. Before, a TUS
+  upload always verified TLS. Thus an upload to a private CA endpoint failed.
 
 ## 0.0.7 - 2026-05-18
 
 ### Added
-- Per-call `account_name` override on all library API functions that send the `X-ICE-Account` header. Callers can pass `account_name=` to `ingest_file`, `recache_file`, `extract_file`, `extract_file_with_metadata`, `delete_file`, `retrieve_file_metadata`, `update_file_metadata`, `retrieve_metadata`, `ingest_files`, and `extract_files_to_directory`; it falls back to `config.storage_account_name` when omitted. This lets a single client config serve multiple tenants without rewriting `storage_account_name` per job.
+- The parameter `account_name` on each library function that sends the account
+  header. If you do not give it, the client uses `config.storage_account_name`.
+  Thus one configuration can serve more than one account.
 
 ### Changed
-- Leading-slash identifier normalization is now applied uniformly, not just in `ingest-one`/`ingest-many`. Identifiers used to build `/file` and `/metadata` URLs, the `X-ICE-Next-File` chain hint in `extract_file_with_metadata`, and the `prefixes` / `identifiers` fields of `retrieve_metadata` queries are all normalized to begin with exactly one `/`.
+- The client normalizes the leading slash of each identifier. Before, it did
+  this only in `ingest-one` and `ingest-many`. This applies to the URLs of
+  `/file` and `/metadata`, the next-file header, and the `prefixes` and
+  `identifiers` fields of a metadata query.
 
 ## 0.0.6 - 2026-04-29
 
 ### Added
-- `ingest-many` now accepts any mix of file paths and directory paths in a single invocation. Each argument's identifier is derived from the path as given; directories are walked recursively and each contained file's identifier extends the directory path with its relative location. `--prefix` is prepended to every derived identifier.
-- `ingest-one` now prepends a leading `/` to the supplied FILE_ID if omitted, so identifiers stored via `ingest-one` and `ingest-many` share the same leading-slash convention and behave consistently with later prefix queries.
-- `certifi` dependency so SSL verification uses the system CA trust store by default.
+- `ingest-many` accepts files and directories together in one command. The
+  identifier comes from the path as given. The client walks a directory and
+  adds the relative location to the identifier. `--prefix` goes before each
+  identifier.
+- `ingest-one` adds a leading `/` to the identifier if you do not give one.
+  Thus the two commands make the same form of identifier.
+- The dependency `certifi`, thus TLS verification uses the CA store of the
+  system.
 
 ### Changed
-- **Breaking:** Client config file is now JSON instead of INI. Standardized on JSON to match the ansible-deployed `/etc/tapest-client/client.conf`, the server config, and the e2e test fixtures. Existing INI configs must be reformatted to JSON, or deleted and regenerated with `tapest-client write-config`.
-- **Breaking:** Renamed config fields `ice_host` -> `host` and `ice_token` -> `token` (and env vars `TAPEST_CLIENT_ICE_HOST` / `TAPEST_CLIENT_ICE_TOKEN` -> `TAPEST_CLIENT_HOST` / `TAPEST_CLIENT_TOKEN`) to match the ansible-deployed key names. The `ice_` prefix was a relic of the pre-rebrand "CSC-ICE" naming.
-- **Breaking:** Removed `ingest_files_from_directory` from the library API; its directory-basename-as-default-prefix convention is superseded by the unified path-as-given identifier convention now used by `ingest-many`. Use `ingest_files` with caller-built `(identifier, path)` tuples for programmatic batch ingest.
-- CLI reports connection errors (unreachable host, refused connection) as a single-line message instead of a Python traceback.
+- **Breaking:** The configuration file is now JSON, not INI. This is the same
+  format as the file `/etc/tapest-client/client.conf` of the deployment. Write
+  the file again, or make a new one with `tapest-client write-config`.
+- **Breaking:** The fields `ice_host` and `ice_token` are now `host` and
+  `token`. The environment values change in the same way.
+- **Breaking:** The function `ingest_files_from_directory` is removed. Use
+  `ingest_files` with your own list of identifier and path pairs.
+- The client gives one line for a connection error. Before, it gave a Python
+  traceback.
 
 ### Documentation
-- Noted that the API normalizes file identifiers to UTF-8 NFC. The client passes identifiers through unchanged, so the `identifier` field returned in metadata may differ from the value passed in (e.g., NFD input is returned in NFC form).
+- The API normalizes each identifier to UTF-8 NFC. The client does not change
+  the identifier. Thus the `identifier` field of the metadata can be different
+  from the value that you sent.
 
 ## 0.0.5 - 2026-04-02
 
 ### Added
-- Command-line tool (`tapest-client`) with argparse
-  - `ingest-one` / `ingest-many` - upload files to the service
-  - `extract-one` / `extract-many` - download files from the service
-  - `delete` - delete a preserved file and its metadata
-  - `query-metadata` / `update-metadata` - query or update file metadata
-  - `status` - retrieve service status
-  - `write-config` - create default user configuration file
-- User-level config at `~/.config/tapest-client/client.conf`
-- `update-metadata` accepts JSON string, `-` for stdin, or `--stdin`
-- `TapestClientError.exit_code` attribute for distinct return codes (117 for file unavailable)
-- RPM packaging: console_scripts entry point, `%{_bindir}/tapest-client`
-- SonarQube integration
-- `sonar-project.properties`
-
-### Changed
-- `.gitlab-ci.yml`: added `tapest.yml` pipeline, `CI_SONAR`, `CI_PYTHON_3`
-- `setup.cfg`: added `console_scripts` entry point, updated description
-- RPM spec: added `python3-devel`, `pip` to BuildRequires, `%{_bindir}/tapest-client` to `%files`
+- The command-line tool `tapest-client`:
+  - `ingest-one` and `ingest-many` send files to the service
+  - `extract-one` and `extract-many` get files from the service
+  - `delete` removes a file and its metadata
+  - `query-metadata` and `update-metadata` read or change metadata
+  - `status` gives the status of the service
+  - `write-config` makes a default configuration file
+- A user configuration at `~/.config/tapest-client/client.conf`.
+- `update-metadata` accepts a JSON string, `-` for stdin, or `--stdin`.
+- The attribute `TapestClientError.exit_code`. The code 117 shows that the file
+  is not available.
+- RPM packaging and SonarQube.
 
 ## 0.0.4 - 2026-03-27
 
 ### Added
-- `Config` dataclass with attribute access (`config.ice_host`) and type coercion driven by field annotations
-- `get_config()` loads from INI file and/or `TAPEST_CLIENT_*` env vars on first call, cached thereafter
-- Test plan docstrings for all test modules
+- The class `Config` with attribute access and type conversion.
+- `get_config()` reads an INI file and the `TAPEST_CLIENT_*` environment
+  values. It keeps the result.
 
 ### Changed
-- **Breaking:** Config is now a dataclass, not a dict. All config keys are lowercase. Client code uses attribute access (`config.ice_token`) instead of dict access (`config["ICE_TOKEN"]`).
+- **Breaking:** The configuration is a dataclass, not a dict. Each key is in
+  lower case. Use `config.ice_token`, not `config["ICE_TOKEN"]`.
 
 ## 0.0.3 - 2026-03-20
 
 ### Changed
-- Moved source from `__init__.py` to `tapest_client/client.py`, `__init__.py` is now public API barrel
-- Added hardcoded `__version__ = "0.0.3"` in `__init__.py`
-- Consolidated metadata into `setup.cfg`, `pyproject.toml` for build-system only
-- Rewritten RPM spec to use pyproject macros (matching tapest-tape-worker pattern)
-- Renamed RPM from `python3-tapest-ice-api-client` to `python3-tapest-client`
-- Added `Obsoletes`/`Provides` for smooth RPM upgrade
-- Removed `GIT_DEPTH` workaround from `.gitlab-ci.yml`
+- The source moved from `__init__.py` to `tapest_client/client.py`.
+  `__init__.py` now gives only the public API.
+- The metadata is in `setup.cfg`. `pyproject.toml` has only the build system.
+- The RPM `python3-tapest-ice-api-client` is now `python3-tapest-client`. The
+  spec has `Obsoletes` and `Provides` for the upgrade.
 
 ### Removed
-- Obsolete SOURCES files (METADATA, RECORD)
-- `csc-ice` references
+- The obsolete SOURCES files and the `csc-ice` references.
 
 ## 0.0.2 - 2026-02-20
 
 ### Added
-- RPM packaging via gitlab-ci-pipeline
-- Hardcoded RPM version to match upstream csc-ice version
+- RPM packaging with the gitlab-ci pipeline.
 
 ## 0.0.1 - 2026-02-14
 
 ### Added
-- Initial RPM packaging of `ice_api_client.py` as `python3-tapest-ice-api-client`
+- The first RPM of `ice_api_client.py`.

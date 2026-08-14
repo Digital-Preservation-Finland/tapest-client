@@ -29,11 +29,9 @@ Usage::
 
 Commands::
 
-    ingest-one         Ingest (upload) a single file
-    ingest-many        Ingest (upload) multiple files or a directory tree
-    extract-one       Extract (download) a single file from the service
-    extract-many      Extract (download) files from the service to a directory
-    delete             Delete a single file and its metadata from the service
+    ingest             Ingest (upload) files or directory trees
+    extract            Extract (download) files from the service
+    delete             Delete files and their metadata from the service
     query-metadata     Query metadata for one or many files
     update-metadata    Update metadata for a single file
     status             Retrieve service status
@@ -111,26 +109,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     subparsers = parser.add_subparsers(dest="command", metavar="COMMAND")
 
-    # ingest-one
+    # ingest
     sub = subparsers.add_parser(
-        "ingest-one", help="Ingest (upload) a single file"
-    )
-    sub.add_argument("file_id", metavar="FILE_ID")
-    sub.add_argument("local_path", metavar="LOCAL_PATH")
-    sub.set_defaults(func=_run_ingest)
-
-    # tus-ingest-one
-    sub = subparsers.add_parser(
-        "tus-ingest-one", help="Ingest (upload) a single file via tus protocol"
-    )
-    sub.add_argument("file_id", metavar="FILE_ID")
-    sub.add_argument("local_path", metavar="LOCAL_PATH")
-    sub.add_argument("--chunk_size", default="16 MiB")
-    sub.set_defaults(func=run_tus_ingest)
-
-    # ingest-many
-    sub = subparsers.add_parser(
-        "ingest-many",
+        "ingest",
         help="Ingest (upload) one or more files and/or directory trees",
     )
     sub.add_argument(
@@ -139,6 +120,11 @@ def build_parser() -> argparse.ArgumentParser:
         nargs="+",
         help="files and/or directories to ingest; identifiers are derived "
         "from the paths as given (directories are walked recursively)",
+    )
+    sub.add_argument(
+        "--identifier",
+        default=None,
+        help="identifier for the file; only with exactly one PATH",
     )
     sub.add_argument(
         "--prefix",
@@ -155,36 +141,33 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="overwrite files that already exist",
     )
-    sub.set_defaults(func=_run_ingest_many)
+    sub.set_defaults(func=_run_ingest)
 
-    # extract-one
+    # extract
     sub = subparsers.add_parser(
-        "extract-one", help="Extract (download) a single file from the service"
+        "extract",
+        help="Extract (download) files from the service",
     )
-    sub.add_argument("file_id", metavar="FILE_ID")
-    sub.add_argument("local_path", metavar="LOCAL_PATH")
     sub.add_argument(
-        "next_file_id", metavar="NEXT_FILE_ID", nargs="?", default=None
+        "args",
+        metavar="FILE_ID... DEST",
+        nargs="+",
+        help="one or more file identifiers, then the destination; the "
+        "destination is a file when one identifier is given and it is not "
+        "an existing directory, else a directory",
     )
-    sub.set_defaults(func=_run_extract)
-
-    # extract-many
-    sub = subparsers.add_parser(
-        "extract-many",
-        help="Extract (download) files from the service to a directory",
-    )
-    sub.add_argument("local_dir", metavar="LOCAL_DIR")
     sub.add_argument(
         "--prefix",
         action="append",
         default=None,
-        help="file identifier prefix (repeatable)",
+        help="file identifier prefix (repeatable); with a prefix the only "
+        "positional argument is the destination directory",
     )
     sub.add_argument(
-        "--identifier",
-        action="append",
+        "--next",
+        dest="next_file_id",
         default=None,
-        help="file identifier (repeatable)",
+        help="identifier of the file to read next, for tape ordering",
     )
     sub.add_argument(
         "--skip",
@@ -196,13 +179,13 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="overwrite files that already exist",
     )
-    sub.set_defaults(func=_run_extract_files)
+    sub.set_defaults(func=_run_extract)
 
     # delete
     sub = subparsers.add_parser(
-        "delete", help="Delete a single file and its metadata from the service"
+        "delete", help="Delete files and their metadata from the service"
     )
-    sub.add_argument("file_id", metavar="FILE_ID")
+    sub.add_argument("file_id", metavar="FILE_ID", nargs="+")
     sub.set_defaults(func=_run_delete)
 
     # query-metadata
@@ -431,80 +414,84 @@ def _run_status(config: Config, args: argparse.Namespace) -> None:
     logger.info("Service status retrieved successfully")
 
 
-def _run_ingest(config: Config, args: argparse.Namespace) -> None:
-    """Ingest a single file."""
-    args.file_id = normalize_identifier(args.file_id)
-    logger.info(
-        "Ingesting file at local pathname '%s' with identifier '%s' ...",
-        args.local_path,
-        args.file_id,
-    )
-    result = tapest_client.ingest_file(
-        config, args.file_id, args.local_path
-    )
-    _print_json(result)
-    logger.info(
-        "Successfully ingested file with identifier '%s' from "
-        "local pathname '%s'",
-        args.file_id,
-        args.local_path,
-    )
-
-
-def run_tus_ingest(config: Config, args: argparse.Namespace) -> None:
-    """Ingest a single file via tus."""
-    args.file_id = normalize_identifier(args.file_id)
-    logger.info(
-        (
-            "Ingesting file at local pathname '%s' with identifier '%s' "
-            "in '%s' chunks..."
-        ),
-        args.local_path,
-        args.file_id,
-        args.chunk_size,
-    )
-    result = tapest_client.tus_ingest_file(
-        config=config,
-        identifier=args.file_id,
-        path=args.local_path,
-        chunk_size=args.chunk_size,
-    )
-    _print_json(result)
-    logger.info(
-        "Successfully ingested file with identifier '%s' from "
-        "local pathname '%s'",
-        args.file_id,
-        args.local_path,
-    )
-
-
 def _run_extract(config: Config, args: argparse.Namespace) -> None:
-    """Extract a single file."""
-    logger.info(
-        "Extracting file with identifier '%s' to local pathname '%s' ...",
-        args.file_id,
-        args.local_path,
-    )
-    result = tapest_client.extract_file(
+    """Extract files from the service.
+
+    The last positional argument is the destination. It is a target file
+    when exactly one identifier is given and it is not an existing
+    directory, otherwise it is a target directory. With --prefix the
+    destination directory is the only positional argument.
+    """
+    if args.prefix:
+        if len(args.args) != 1:
+            raise TapestClientError(
+                "with --prefix give only the destination directory"
+            )
+        identifiers, dest = [], args.args[0]
+    else:
+        if len(args.args) < 2:
+            raise TapestClientError(
+                "give one or more FILE_ID and then the destination"
+            )
+        identifiers, dest = args.args[:-1], args.args[-1]
+
+    if len(identifiers) == 1 and not Path(dest).is_dir():
+        identifier = normalize_identifier(identifiers[0])
+        logger.info(
+            "Extracting file with identifier '%s' to local pathname '%s' ...",
+            identifier,
+            dest,
+        )
+        result = tapest_client.extract_file(
+            config,
+            identifier,
+            dest,
+            next_identifier=args.next_file_id,
+        )
+        _print_json(result)
+        logger.info(
+            "Successfully extracted file with identifier '%s' to "
+            "local pathname '%s'",
+            identifier,
+            dest,
+        )
+        return
+
+    args.identifier = [
+        normalize_identifier(i) for i in identifiers
+    ] or None
+    query = _build_query(args)
+    logger.info("Retrieving metadata for files to extract ...")
+    metadata_result = tapest_client.retrieve_metadata(config, query=query)
+    metadata_list = metadata_result.get("metadata", [])
+
+    if not metadata_list:
+        logger.info("No files match the specified criteria")
+        return
+
+    logger.info("Extracting %d file(s) to '%s' ...", len(metadata_list), dest)
+    results = tapest_client.extract_files_to_directory(
         config,
-        args.file_id,
-        args.local_path,
-        next_identifier=args.next_file_id,
+        metadata_list,
+        dest,
+        skip=args.skip,
+        force=args.force,
     )
-    _print_json(result)
+    _print_json(results)
     logger.info(
-        "Successfully extracted file with identifier '%s' to "
-        "local pathname '%s'",
-        args.file_id,
-        args.local_path,
+        "Successfully extracted %d file(s) to '%s'", len(results), dest
     )
 
 
 def _run_delete(config: Config, args: argparse.Namespace) -> None:
-    """Delete a file."""
-    logger.info("Deleting file with identifier '%s' ...", args.file_id)
-    tapest_client.delete_file(config, args.file_id)
-    logger.info("Successfully deleted file with identifier '%s'", args.file_id)
+    """Delete one or more files."""
+    for file_id in args.file_id:
+        identifier = normalize_identifier(file_id)
+        logger.info("Deleting file with identifier '%s' ...", identifier)
+        tapest_client.delete_file(config, identifier)
+        logger.info(
+            "Successfully deleted file with identifier '%s'", identifier
+        )
 
 
 def _build_query(args: argparse.Namespace) -> dict:
@@ -592,78 +579,81 @@ def _run_update_metadata(config: Config, args: argparse.Namespace) -> None:
     )
 
 
-def _run_ingest_many(config: Config, args: argparse.Namespace) -> None:
-    """Ingest one or more files and/or directory trees.
+def _ingest_named_file(config: Config, args: argparse.Namespace) -> None:
+    """Ingest the one PATH under the identifier given by --identifier."""
+    if len(args.paths) != 1:
+        raise TapestClientError("--identifier accepts exactly one PATH")
+    local_path = args.paths[0]
+    if not Path(local_path).is_file():
+        raise TapestClientError(f"Path is not a file: {local_path}")
+    identifier = normalize_identifier(args.identifier)
+    logger.info(
+        "Ingesting file at local pathname '%s' with identifier '%s' ...",
+        local_path,
+        identifier,
+    )
+    result = tapest_client.ingest_file(config, identifier, local_path)
+    _print_json(result)
+    logger.info(
+        "Successfully ingested file with identifier '%s' from "
+        "local pathname '%s'",
+        identifier,
+        local_path,
+    )
 
-    Each CLI path becomes an identifier built from the path as given:
-    a file path becomes a single identifier, a directory path is walked
-    recursively and each contained file's identifier is the directory
-    path plus its relative location inside the tree. ``--prefix`` is
-    prepended to every derived identifier.
+
+def _collect_ingest_files(
+    paths: list[str], prefix: str
+) -> list[tuple[str, str]]:
+    """Pair each identifier with its local pathname.
+
+    A file path gives one pair, a directory path is walked recursively.
+
+    :raises TapestClientError: If a path does not exist.
     """
-    prefix = args.prefix or ""
-
     files: list[tuple[str, str]] = []
-    for cli_path in args.paths:
-        p = Path(cli_path)
-        base = p.as_posix()
+    for cli_path in paths:
+        path = Path(cli_path)
+        base = path.as_posix()
         # Identifiers are built by naive join and canonicalized centrally,
         # so '.', '..', '//' and stray slashes all collapse to '/<relpath>'.
-        if p.is_file():
-            files.append((normalize_identifier(f"{prefix}/{base}"), str(p)))
-        elif p.is_dir():
-            for sub in sorted(p.rglob("*")):
+        if path.is_file():
+            files.append(
+                (normalize_identifier(f"{prefix}/{base}"), str(path))
+            )
+        elif path.is_dir():
+            for sub in sorted(path.rglob("*")):
                 if sub.is_file():
-                    rel = sub.relative_to(p).as_posix()
-                    identifier = normalize_identifier(f"{prefix}/{base}/{rel}")
+                    rel = sub.relative_to(path).as_posix()
+                    identifier = normalize_identifier(
+                        f"{prefix}/{base}/{rel}"
+                    )
                     files.append((identifier, str(sub)))
         else:
             raise TapestClientError(f"Path does not exist: {cli_path}")
+    return files
 
+
+def _run_ingest(config: Config, args: argparse.Namespace) -> None:
+    """Ingest files and directory trees.
+
+    Each identifier is built from the path as given: a file path gives one
+    identifier, a directory path is walked recursively and each file below
+    it keeps its location in the tree. --prefix is prepended to every
+    derived identifier. --identifier names one file instead, so its
+    identifier and its local path can differ.
+    """
+    if args.identifier is not None:
+        _ingest_named_file(config, args)
+        return
+
+    files = _collect_ingest_files(args.paths, args.prefix or "")
     logger.info("Ingesting %d file(s) ...", len(files))
     results = tapest_client.ingest_files(
         config, files, skip=args.skip, force=args.force
     )
     _print_json(results)
     logger.info("Successfully ingested %d file(s)", len(results))
-
-
-def _run_extract_files(config: Config, args: argparse.Namespace) -> None:
-    """Extract files to a directory."""
-    if not any([args.prefix, args.identifier]):
-        logger.error("extract-many requires at least one of -p or -i")
-        sys.exit(2)
-
-    query = _build_query(args)
-    logger.info("Retrieving metadata for files to extract ...")
-    metadata_result = tapest_client.retrieve_metadata(config, query=query)
-    metadata_list = metadata_result.get("metadata", [])
-
-    if not metadata_list:
-        logger.info("No files match the specified criteria")
-        return
-
-    logger.info(
-        "Extracting %d file(s) to '%s' ...",
-        len(metadata_list),
-        args.local_dir,
-    )
-    results = tapest_client.extract_files_to_directory(
-        config,
-        metadata_list,
-        args.local_dir,
-        skip=args.skip,
-        force=args.force,
-    )
-    _print_json(results)
-    logger.info(
-        "Successfully extracted %d file(s) to '%s'",
-        len(results),
-        args.local_dir,
-    )
-
-
-# -- Entry point -------------------------------------------------------------
 
 
 def main() -> None:
