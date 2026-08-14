@@ -278,7 +278,8 @@ def mock_tus_endpoints(config_fx):
         mock.get(
             f"{config.host}/metadata", text=metadata_response, status_code=200
         )
-        yield
+        # Yield the mocker so tests can override a route or inspect history.
+        yield mock
 
 
 @pytest.fixture(scope="function", autouse=True)

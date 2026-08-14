@@ -6,6 +6,8 @@ responses. All HTTP calls are mocked via the ``requests_fx`` fixture.
 """
 
 
+from base64 import b64encode
+
 import pytest
 import requests_mock
 from tapest_client.client import (
@@ -112,13 +114,16 @@ def test_ingest_conflict_without_marker_raises(
 
 
 def test_recache_success(tmp_path, config_fx, requests_fx):
-    """Successful recache verifies file and returns metadata."""
+    """Successful PUT recache verifies file and returns metadata."""
     path = tmp_path / "file.dat"
     path.write_bytes(b"hello world")
     requests_fx.responses["get"] = mock_response(200, json_data=SAMPLE_METADATA)
     requests_fx.responses["put"] = mock_response(201, json_data=SAMPLE_METADATA)
-    result = recache_file(config_fx(), "/pkg/file.dat", str(path))
+    result = recache_file(
+        config_fx(), "/pkg/file.dat", str(path), use_tus=False
+    )
     assert result == SAMPLE_METADATA
+    assert requests_fx.calls["put"]["headers"]["X-TAPEST-Recache"] == "true"
 
 
 def test_recache_size_mismatch(tmp_path, config_fx, requests_fx):
@@ -128,7 +133,7 @@ def test_recache_size_mismatch(tmp_path, config_fx, requests_fx):
     meta = {**SAMPLE_METADATA, "size": 99999}
     requests_fx.responses["get"] = mock_response(200, json_data=meta)
     with pytest.raises(TapestClientError, match="size"):
-        recache_file(config_fx(), "/pkg/file.dat", str(path))
+        recache_file(config_fx(), "/pkg/file.dat", str(path), use_tus=False)
 
 
 def test_recache_checksum_mismatch(tmp_path, config_fx, requests_fx):
@@ -138,7 +143,42 @@ def test_recache_checksum_mismatch(tmp_path, config_fx, requests_fx):
     meta = {**SAMPLE_METADATA, "checksum": "sha256:bad"}
     requests_fx.responses["get"] = mock_response(200, json_data=meta)
     with pytest.raises(TapestClientError, match="checksum"):
-        recache_file(config_fx(), "/pkg/file.dat", str(path))
+        recache_file(config_fx(), "/pkg/file.dat", str(path), use_tus=False)
+
+
+def test_recache_tus_success(tmp_path, config_fx, mock_tus_endpoints):
+    """Default recache uploads over TUS with the X-TAPEST-Recache marker."""
+    path = tmp_path / "file.dat"
+    path.write_bytes(b"hello world")  # matches SAMPLE_METADATA size + checksum
+    config = config_fx()
+    # Override the stub /metadata so the pre-check gets real fields.
+    mock_tus_endpoints.get(f"{config.host}/metadata", json=SAMPLE_METADATA)
+
+    result = recache_file(config, "/pkg/file.dat", str(path))
+
+    assert result == SAMPLE_METADATA
+    posts = [
+        r for r in mock_tus_endpoints.request_history
+        if r.method == "POST" and r.url.endswith("/tus")
+    ]
+    assert len(posts) == 1
+    meta_header = posts[0].headers["Upload-Metadata"]
+    recache_pair = f"X-TAPEST-Recache {b64encode(b'true').decode()}"
+    assert recache_pair in meta_header
+
+
+def test_recache_tus_size_mismatch(tmp_path, config_fx, mock_tus_endpoints):
+    """TUS recache pre-check fails on size before any upload starts."""
+    path = tmp_path / "file.dat"
+    path.write_bytes(b"short")
+    config = config_fx()
+    meta = {**SAMPLE_METADATA, "size": 99999}
+    mock_tus_endpoints.get(f"{config.host}/metadata", json=meta)
+    with pytest.raises(TapestClientError, match="size"):
+        recache_file(config, "/pkg/file.dat", str(path))
+    assert not [
+        r for r in mock_tus_endpoints.request_history if r.method == "POST"
+    ]
 
 
 # === extract_file ===

@@ -251,53 +251,39 @@ def _tus_storage_path(identifier: str) -> Path:
 # === Core Operation Functions ===
 
 
-def tus_ingest_file(
+def _tus_upload(
     config: Config,
     identifier: str,
     path: str,
-    checksum: str | None = None,
-    account_name: str | None = None,
-    chunk_size: str = "16 MiB",
-):
-    """Ingest a local file via TUS endpoint.
+    size: int,
+    metadata: dict,
+    account_name: str | None,
+    chunk_size: str,
+) -> dict:
+    """Upload ``path`` to the TUS endpoint and return the file's metadata.
+
+    Shared by TUS ingest and recache; the caller builds the ``Upload-Metadata``
+    dict (``filename`` plus ``X-TAPEST-*`` keys).
 
     :param config: Config instance.
-    :param identifier: File identifier.
-    :param path: local file URI.
-    :param checksum: Pre-given checksum so that checksum calculation
-        can be given during this function's call.
+    :param identifier: File identifier, for the closing metadata fetch.
+    :param path: Local file URI.
+    :param size: File size in bytes.
+    :param metadata: TUS Upload-Metadata dict.
     :param account_name: Per-call override for ``X-TAPEST-Account``.
-        Falls back to ``config.storage_account_name`` if unset.
-    :param chunk_size: Size of chunks to send as part of TUS upload.
+    :param chunk_size: TUS chunk size.
     """
     chunk_size_in_bytes = parse_chunk_size(chunk_size=chunk_size)
     tus_client_obj = tus_client.TusClient(url=f"{config.host}/tus")
-    stat = Path(path).stat()
-    if checksum is None:
-        checksum = generate_checksum(local_file_pathname=path)
-    created = datetime.fromtimestamp(stat.st_ctime, timezone.utc).strftime(
-        TIMESTAMP_FORMAT
-    )
-    modified = datetime.fromtimestamp(stat.st_mtime, timezone.utc).strftime(
-        TIMESTAMP_FORMAT
-    )
     headers = _build_headers(
         config=config,
         extra={
-            "X-TAPEST-Size": str(stat.st_size),
+            "X-TAPEST-Size": str(size),
         },
         account_name=account_name,
     )
     for key, value in headers.items():
         tus_client_obj.headers[key] = value
-    # File-identity metadata travels in the TUS Upload-Metadata, so it is
-    # captured once on POST initialization and persisted by the server.
-    metadata = {
-        "filename": normalize_identifier(identifier=identifier),
-        "X-TAPEST-Checksum": checksum,
-        "X-TAPEST-Created": created,
-        "X-TAPEST-Modified": modified,
-    }
     storage_path = _tus_storage_path(metadata["filename"])
     # Platformdirs 2.5.4 version does not support "ensure_exists"
     # so this is a workaround for it.
@@ -331,6 +317,53 @@ def tus_ingest_file(
         config=config,
         identifier=identifier,
         account_name=account_name,
+    )
+
+
+def tus_ingest_file(
+    config: Config,
+    identifier: str,
+    path: str,
+    checksum: str | None = None,
+    account_name: str | None = None,
+    chunk_size: str = "16 MiB",
+):
+    """Ingest a local file via TUS endpoint.
+
+    :param config: Config instance.
+    :param identifier: File identifier.
+    :param path: local file URI.
+    :param checksum: Pre-given checksum so that checksum calculation
+        can be given during this function's call.
+    :param account_name: Per-call override for ``X-TAPEST-Account``.
+        Falls back to ``config.storage_account_name`` if unset.
+    :param chunk_size: Size of chunks to send as part of TUS upload.
+    """
+    stat = Path(path).stat()
+    if checksum is None:
+        checksum = generate_checksum(local_file_pathname=path)
+    created = datetime.fromtimestamp(stat.st_ctime, timezone.utc).strftime(
+        TIMESTAMP_FORMAT
+    )
+    modified = datetime.fromtimestamp(stat.st_mtime, timezone.utc).strftime(
+        TIMESTAMP_FORMAT
+    )
+    # File-identity metadata travels in the TUS Upload-Metadata, so it is
+    # captured once on POST initialization and persisted by the server.
+    metadata = {
+        "filename": normalize_identifier(identifier=identifier),
+        "X-TAPEST-Checksum": checksum,
+        "X-TAPEST-Created": created,
+        "X-TAPEST-Modified": modified,
+    }
+    return _tus_upload(
+        config=config,
+        identifier=identifier,
+        path=path,
+        size=stat.st_size,
+        metadata=metadata,
+        account_name=account_name,
+        chunk_size=chunk_size,
     )
 
 
@@ -419,10 +452,18 @@ def recache_file(
     identifier: str,
     local_file_pathname: str,
     account_name: str | None = None,
+    use_tus: bool = True,
+    chunk_size: str = "16 MiB",
 ) -> dict:
     """Re-upload a cached file, verifying it matches.
 
+    Uploads over TUS by default; ``use_tus=False`` sends a single PUT instead,
+    which can be faster for small files.
+
     See :func:`ingest_file` for the semantics of ``account_name``.
+
+    :param use_tus: Upload over TUS (default) or a single PUT when False.
+    :param chunk_size: TUS chunk size; ignored when ``use_tus`` is False.
     """
     path = Path(local_file_pathname)
     file_metadata = retrieve_file_metadata(
@@ -440,6 +481,25 @@ def recache_file(
     if checksum != file_metadata["checksum"]:
         raise TapestClientError(
             "Local file checksum does not match ingested checksum"
+        )
+
+    if use_tus:
+        # Identity fields come from the server record to preserve timestamps.
+        metadata = {
+            "filename": normalize_identifier(identifier=identifier),
+            "X-TAPEST-Checksum": file_metadata["checksum"],
+            "X-TAPEST-Created": file_metadata["created"],
+            "X-TAPEST-Modified": file_metadata["modified"],
+            "X-TAPEST-Recache": "true",
+        }
+        return _tus_upload(
+            config=config,
+            identifier=identifier,
+            path=str(path),
+            size=file_metadata["size"],
+            metadata=metadata,
+            account_name=account_name,
+            chunk_size=chunk_size,
         )
 
     url = _file_url(config, identifier)
