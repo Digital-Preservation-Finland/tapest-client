@@ -313,6 +313,7 @@ def _tus_upload(
                 ) from error
         else:
             raise
+    storage_path.unlink(missing_ok=True)
     return retrieve_file_metadata(
         config=config,
         identifier=identifier,
