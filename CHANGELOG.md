@@ -5,6 +5,43 @@ All notable changes to this project are in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+### Changed
+- **Breaking:** The library functions process one file. `ingest_files` and
+  `extract_files_to_directory` are removed. Loop over `ingest_file` or
+  `extract_file_with_metadata` in your own code. Thus the error handling of
+  one file is yours.
+- **Breaking:** `ingest_file` and `extract_file_with_metadata` raise
+  `FileAlreadyExistsError` when a different file has the identifier or the
+  local pathname. The class is a `TapestClientError` and also a builtin
+  `FileExistsError`. The parameter `raise_for_status` of `ingest_file` is
+  removed.
+- The options `--skip` and `--force` are in the command-line client, not in the
+  library. With `--skip` the command `ingest` reads the metadata of the file
+  before the upload. Thus a file that is stored already is not sent again.
+  Before, the client sent the whole file and the API answered 409 to it. A
+  duplicate that appears between the read and the upload gives the error of the
+  API.
+- **Breaking:** `ingest` has no option `--force`. An identifier that has been
+  used is not free again, not even after a delete, so the client cannot replace
+  a stored file. A local file that differs from the stored one is an error. Use
+  a new identifier for new content. `extract --force` is unchanged: it replaces
+  a local file.
+- **Breaking:** `ingest PATH...` and `extract FILE_ID... DEST` print one JSON
+  record for each file on its own line, when the file is done. Before, they
+  printed one JSON array after the whole batch, so a long run gave no output
+  until the end, and nothing at all if it stopped in the middle. A command that
+  handles one file prints one JSON object as before.
+- The results of `ingest` and `extract` are the files that the client sent. A
+  file that the client leaves as it is has a line in the log, not a record in
+  the output.
+
+### Fixed
+- `ingest --identifier ID PATH` uses `--skip`, and `extract FILE_ID DEST` uses
+  `--skip` and `--force`. Before, these options gave no result for one named
+  file.
+
 ## 0.0.11 - 2026-08-18
 
 ### Changed

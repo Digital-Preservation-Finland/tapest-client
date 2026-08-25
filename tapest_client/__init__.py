@@ -10,6 +10,7 @@ from .config import Config, get_config
 
 from .client import (
     TapestClientError,
+    FileAlreadyExistsError,
     normalize_identifier,
     generate_checksum,
     is_same_file,
@@ -23,14 +24,13 @@ from .client import (
     update_file_metadata,
     retrieve_metadata,
     retrieve_status,
-    ingest_files,
-    extract_files_to_directory,
 )
 
 __all__ = [
     "Config",
     "get_config",
     "TapestClientError",
+    "FileAlreadyExistsError",
     "normalize_identifier",
     "generate_checksum",
     "is_same_file",
@@ -44,6 +44,4 @@ __all__ = [
     "update_file_metadata",
     "retrieve_metadata",
     "retrieve_status",
-    "ingest_files",
-    "extract_files_to_directory",
 ]

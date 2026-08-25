@@ -98,7 +98,7 @@ network.
 ### Ingest (upload)
 
 ```
-tapest-client ingest PATH [PATH ...] [--identifier ID] [--prefix PFX] [--skip] [--force]
+tapest-client ingest PATH [PATH ...] [--identifier ID] [--prefix PFX] [--skip]
 ```
 
 `ingest` accepts any mix of file paths and directory paths. Each file's
@@ -199,12 +199,27 @@ JSON can be provided as:
 - From stdin: `cat update.json | tapest-client update-metadata /id --stdin`
 - From stdin (POSIX): `cat update.json | tapest-client update-metadata /id -`
 
+### Output
+
+Logs go to stderr, data to stdout. A command that handles one file prints one
+JSON object. `ingest PATH...` and `extract FILE_ID... DEST` print one JSON
+record per line, as each file is done, so the output of a long run can be read
+and piped while it runs:
+
+```
+tapest-client ingest --prefix acme some_dir | jq -r .identifier
+```
+
 ### Batch option flags
 
-| Flag      | Description                             |
-|-----------|-----------------------------------------|
-| `--skip`  | Skip files that already exist and match |
-| `--force` | Overwrite files that already exist      |
+| Flag      | `ingest`                                  | `extract`                           |
+|-----------|-------------------------------------------|-------------------------------------|
+| `--skip`  | Do not send a file that is stored already | Keep a local file that matches      |
+| `--force` | not available                             | Overwrite a local file that differs |
+
+An identifier that has been used is not free again, not even after `delete`, so
+`ingest` cannot replace a stored file. A local file that differs from the stored
+one is an error. Use a new identifier for new content.
 
 ### Other commands
 
@@ -236,6 +251,30 @@ config = Config(
 
 metadata = extract_file(config, "/path/to/file", "/local/path")
 ```
+
+### Files that already exist
+
+`ingest_file` raises `FileAlreadyExistsError` when a different file has the
+identifier. The class is also a builtin `FileExistsError`. Your application
+decides what happens next.
+
+```python
+from tapest_client import FileAlreadyExistsError, ingest_file
+
+for identifier, path in files:
+    try:
+        ingest_file(config, identifier, path)
+    except FileAlreadyExistsError:
+        logger.warning("Identifier %s is in use, file not sent", identifier)
+```
+
+An identifier that has been used is not free again, not even after `delete_file`,
+so the file cannot be replaced. Send new content under a new identifier.
+
+To send nothing for a file that is already stored, read the metadata first with
+`retrieve_file_metadata(config, identifier, missing_ok=True)` and compare it to
+`generate_checksum(path)`. This is what `--skip` of the command-line client
+does.
 
 ## Testing
 

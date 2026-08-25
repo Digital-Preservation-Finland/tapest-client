@@ -9,10 +9,10 @@ responses. All HTTP calls are mocked via the ``requests_fx`` fixture.
 from base64 import b64encode
 
 import pytest
-import requests_mock
 from tapest_client import client
 from tapest_client.client import (
     _tus_storage_path,
+    FileAlreadyExistsError,
     TapestClientError,
     ingest_file,
     recache_file,
@@ -23,9 +23,6 @@ from tapest_client.client import (
     update_file_metadata,
     retrieve_metadata,
     retrieve_status,
-    ingest_files,
-    extract_files_to_directory,
-    generate_checksum,
     _tus_upload_file,
 )
 
@@ -101,14 +98,20 @@ def test_ingest_identical_duplicate_returns_metadata(
 def test_ingest_conflict_without_marker_raises(
     tmp_path, config_fx, requests_fx
 ):
-    """A 409 for a different file (no marker) is a genuine conflict and raises."""
+    """A 409 for a different file (no marker) is a genuine conflict.
+
+    Whether to replace the stored file is the caller's decision, so the
+    error is typed and also a builtin FileExistsError.
+    """
     path = tmp_path / "file.dat"
     path.write_bytes(b"hello world")
     requests_fx.responses["put"] = mock_response(
         409, json_data={"detail": "A file already exists"}
     )
-    with pytest.raises(TapestClientError, match="409"):
+    with pytest.raises(FileAlreadyExistsError, match="already exists") as err:
         ingest_file(config_fx(), "/pkg/file.dat", str(path))
+    assert isinstance(err.value, FileExistsError)
+    assert isinstance(err.value, TapestClientError)
 
 
 # === recache_file ===
@@ -209,10 +212,10 @@ def test_extract_with_metadata_success(tmp_path, config_fx, requests_fx):
 
 
 def test_extract_with_metadata_already_exists(tmp_path, config_fx):
-    """Raises if destination file already exists."""
+    """Raises FileAlreadyExistsError if the destination is taken."""
     dest = tmp_path / "out.dat"
     dest.write_bytes(b"existing")
-    with pytest.raises(TapestClientError, match="already exists"):
+    with pytest.raises(FileAlreadyExistsError, match="already exists"):
         extract_file_with_metadata(config_fx(), SAMPLE_METADATA, str(dest))
 
 
@@ -346,165 +349,6 @@ def test_retrieve_status_success(config_fx, requests_fx):
     assert retrieve_status(config_fx()) == {"status": "ok"}
 
 
-# === ingest_files ===
-
-
-def test_ingest_files_new(tmp_path, config_fx):
-    """ingest_files uploads each (identifier, path) pair."""
-    f1 = tmp_path / "a.dat"
-    f2 = tmp_path / "b.dat"
-    f1.write_bytes(b"aaa")
-    f2.write_bytes(b"bbb")
-    config = config_fx()
-    with requests_mock.Mocker() as mock:
-        mock.put(url=f"{config.host}/file", status_code=201, json=SAMPLE_METADATA)
-        result = ingest_files(
-            config, [("/pkg/a.dat", str(f1)), ("/pkg/b.dat", str(f2))]
-        )
-    assert len(result) == 2
-
-
-def test_ingest_files_skip_existing(tmp_path, config_fx):
-    """skip=True skips files that match server metadata."""
-    path = tmp_path / "a.dat"
-    path.write_bytes(b"hello world")
-    checksum = generate_checksum(path)
-    meta = {**SAMPLE_METADATA, "size": 11, "checksum": checksum}
-    config = config_fx()
-    with requests_mock.Mocker() as mock:
-        mock.put(url=f"{config.host}/file", status_code=409)
-        mock.get(url=f"{config.host}/metadata", json=meta)
-        result = ingest_files(config, [("/pkg/a.dat", str(path))], skip=True)
-    assert len(result) == 0
-
-
-def test_ingest_files_conflict_raises(tmp_path, config_fx):
-    """Raises if identifier exists on server and neither skip nor force."""
-    path = tmp_path / "a.dat"
-    path.write_bytes(b"data")
-    config = config_fx()
-    with requests_mock.Mocker() as mock:
-        mock.put(url=f"{config.host}/file", status_code=409)
-        mock.get(url=f"{config.host}/metadata", json=SAMPLE_METADATA)
-        with pytest.raises(TapestClientError, match="already exists"):
-            ingest_files(config, [("/pkg/a.dat", str(path))])
-
-
-def test_ingest_files_force_replaces(tmp_path, config_fx):
-    """force=True deletes and re-ingests files that differ from server."""
-    path = tmp_path / "a.dat"
-    path.write_bytes(b"new content")
-    meta = {**SAMPLE_METADATA, "size": 5, "checksum": "sha256:old"}
-    config = config_fx()
-    with requests_mock.Mocker() as mock:
-        mock.put(
-            url=f"{config.host}/file",
-            response_list=[
-                {"status_code": 409},
-                {"status_code": 201, "json": meta},
-            ],
-        )
-        mock.get(url=f"{config.host}/metadata", json=meta)
-        mock.delete(url=f"{config.host}/file", status_code=204)
-        result = ingest_files(config, [("/pkg/a.dat", str(path))], force=True)
-        assert len(result) == 1
-        assert mock.call_count == 4
-
-
-def test_ingest_files_force_skips_matching(tmp_path, config_fx):
-    """force=True silently skips files whose checksum matches the server."""
-    path = tmp_path / "a.dat"
-    path.write_bytes(b"hello world")
-    checksum = generate_checksum(path)
-    meta = {**SAMPLE_METADATA, "size": 11, "checksum": checksum}
-    config = config_fx()
-    with requests_mock.Mocker() as mock:
-        mock.put(url=f"{config.host}/file", status_code=409)
-        mock.get(url=f"{config.host}/metadata", json=meta)
-        result = ingest_files(config, [("/pkg/a.dat", str(path))], force=True)
-    assert result == []
-
-
-# === extract_files_to_directory ===
-
-
-def test_extract_directory_not_a_directory(tmp_path, config_fx):
-    """Raises if target directory does not exist."""
-    with pytest.raises(TapestClientError, match="does not exist"):
-        extract_files_to_directory(config_fx(), [], str(tmp_path / "nope"))
-
-
-def test_extract_directory_new_files(tmp_path, config_fx, requests_fx):
-    """Files are downloaded and written to the target directory."""
-    meta = {**SAMPLE_METADATA, "identifier": "/pkg/file.dat"}
-    requests_fx.responses["get"] = _download_response()
-    result = extract_files_to_directory(config_fx(), [meta], str(tmp_path))
-    assert len(result) == 1
-    assert (tmp_path / "pkg" / "file.dat").exists()
-
-
-def test_extract_directory_skip_existing(tmp_path, config_fx):
-    """skip=True skips files that match local copy."""
-    path = tmp_path / "pkg" / "file.dat"
-    path.parent.mkdir(parents=True)
-    path.write_bytes(b"hello world")
-    checksum = generate_checksum(path)
-    meta = {
-        **SAMPLE_METADATA,
-        "identifier": "/pkg/file.dat",
-        "size": 11,
-        "checksum": checksum,
-    }
-    result = extract_files_to_directory(config_fx(), [meta], str(tmp_path), skip=True)
-    assert len(result) == 0
-
-
-def test_extract_directory_force_replaces(tmp_path, config_fx, requests_fx):
-    """force=True re-downloads files that differ from local copy."""
-    path = tmp_path / "pkg" / "file.dat"
-    path.parent.mkdir(parents=True)
-    path.write_bytes(b"old content")
-    meta = {**SAMPLE_METADATA, "identifier": "/pkg/file.dat"}
-    requests_fx.responses["get"] = _download_response()
-    result = extract_files_to_directory(config_fx(), [meta], str(tmp_path), force=True)
-    assert len(result) == 1
-
-
-def test_extract_directory_conflict_raises(tmp_path, config_fx):
-    """Raises if file exists locally and neither skip nor force is set."""
-    path = tmp_path / "pkg" / "file.dat"
-    path.parent.mkdir(parents=True)
-    path.write_bytes(b"data")
-    meta = {**SAMPLE_METADATA, "identifier": "/pkg/file.dat"}
-    with pytest.raises(TapestClientError, match="already exists"):
-        extract_files_to_directory(config_fx(), [meta], str(tmp_path))
-
-
-def test_extract_directory_next_identifier(tmp_path, config_fx, requests_fx):
-    """Next file identifier is sent as prefetch hint header."""
-    meta1 = {**SAMPLE_METADATA, "identifier": "/pkg/a.dat"}
-    meta2 = {**SAMPLE_METADATA, "identifier": "/pkg/b.dat"}
-    requests_fx.responses["get"] = _download_response()
-    extract_files_to_directory(config_fx(), [meta1, meta2], str(tmp_path))
-    assert "X-TAPEST-Next-File" in requests_fx.all_calls["get"][0]["headers"]
-
-
-def test_extract_directory_force_skips_matching(tmp_path, config_fx):
-    """force=True silently skips local files whose checksum matches."""
-    path = tmp_path / "pkg" / "file.dat"
-    path.parent.mkdir(parents=True)
-    path.write_bytes(b"hello world")
-    checksum = generate_checksum(path)
-    meta = {
-        **SAMPLE_METADATA,
-        "identifier": "/pkg/file.dat",
-        "size": 11,
-        "checksum": checksum,
-    }
-    result = extract_files_to_directory(config_fx(), [meta], str(tmp_path), force=True)
-    assert result == []
-
-
 # === ca_cert_path ===
 
 
@@ -553,6 +397,24 @@ def test_state_file_name_is_filesystem_safe():
     """Identifiers hold slashes and arbitrary characters."""
     name = _tus_storage_path("/deep/path/with spaces/and:colons.dat").name
     assert "/" not in name and name.isalnum()
+
+
+def test_tus_duplicate_raises_file_already_exists(
+    tmp_path, config_fx, mock_tus_endpoints
+):
+    """A TUS upload onto a taken identifier raises the same error as PUT."""
+    path = tmp_path / "file.dat"
+    path.write_bytes(b"my test file")
+    config = config_fx()
+    mock_tus_endpoints.post(
+        f"{config.host}/tus",
+        status_code=409,
+        json={"detail": "A file already exists"},
+    )
+    with pytest.raises(FileAlreadyExistsError, match="already exists"):
+        _tus_upload_file(
+            config=config, identifier="/dup.dat", path=str(path)
+        )
 
 
 @pytest.mark.usefixtures("mock_tus_endpoints")

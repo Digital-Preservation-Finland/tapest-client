@@ -50,7 +50,11 @@ import sys
 
 import requests
 import tapest_client
-from tapest_client import TapestClientError, normalize_identifier
+from tapest_client import (
+    FileAlreadyExistsError,
+    TapestClientError,
+    normalize_identifier,
+)
 from tapest_client.config import CONFIG_FILE, Config
 
 logger = logging.getLogger("tapest-client")
@@ -134,12 +138,7 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_argument(
         "--skip",
         action="store_true",
-        help="skip files that already exist and match",
-    )
-    sub.add_argument(
-        "--force",
-        action="store_true",
-        help="overwrite files that already exist",
+        help="skip files that are already stored and match",
     )
     sub.set_defaults(func=_run_ingest)
 
@@ -334,6 +333,11 @@ def _print_json(data: object) -> None:
     print(json.dumps(data, indent=2))
 
 
+def _print_jsonl(data: object) -> None:
+    """Print one record as a single JSON line, for a batch in progress."""
+    print(json.dumps(data), flush=True)
+
+
 # Per-copy timestamp fields shown (as presence marks) in the table view.
 _COPY_MARKS = ("stored", "checked", "queued", "required", "extracted")
 
@@ -414,49 +418,63 @@ def _run_status(config: Config, args: argparse.Namespace) -> None:
     logger.info("Service status retrieved successfully")
 
 
-def _run_extract(config: Config, args: argparse.Namespace) -> None:
-    """Extract files from the service.
-
-    The last positional argument is the destination. It is a target file
-    when exactly one identifier is given and it is not an existing
-    directory, otherwise it is a target directory. With --prefix the
-    destination directory is the only positional argument.
-    """
+def _extract_targets(args: argparse.Namespace) -> tuple[list[str], str]:
+    """Split the positional arguments into identifiers and a destination."""
     if args.prefix:
         if len(args.args) != 1:
             raise TapestClientError(
                 "with --prefix give only the destination directory"
             )
-        identifiers, dest = [], args.args[0]
-    else:
-        if len(args.args) < 2:
-            raise TapestClientError(
-                "give one or more FILE_ID and then the destination"
-            )
-        identifiers, dest = args.args[:-1], args.args[-1]
+        return [], args.args[0]
+    if len(args.args) < 2:
+        raise TapestClientError(
+            "give one or more FILE_ID and then the destination"
+        )
+    return args.args[:-1], args.args[-1]
 
-    if len(identifiers) == 1 and not Path(dest).is_dir():
-        identifier = normalize_identifier(identifiers[0])
-        logger.info(
-            "Extracting file with identifier '%s' to local pathname '%s' ...",
-            identifier,
-            dest,
-        )
-        result = tapest_client.extract_file(
-            config,
-            identifier,
-            dest,
-            next_identifier=args.next_file_id,
-        )
-        _print_json(result)
-        logger.info(
-            "Successfully extracted file with identifier '%s' to "
-            "local pathname '%s'",
-            identifier,
-            dest,
-        )
+
+def _next_identifier(metadata_list: list[dict], index: int) -> str | None:
+    """Identifier of the file after ``index``, to warm the next recache."""
+    if index + 1 < len(metadata_list):
+        return metadata_list[index + 1]["identifier"]
+    return None
+
+
+def _extract_to_file(
+    config: Config, identifier: str, dest: str, args: argparse.Namespace
+) -> None:
+    """Extract one file to a target file name."""
+    logger.info(
+        "Extracting file with identifier '%s' to local pathname '%s' ...",
+        identifier,
+        dest,
+    )
+    result = _extract_one(
+        config,
+        tapest_client.retrieve_file_metadata(config, identifier),
+        Path(dest),
+        args.next_file_id,
+        args.skip,
+        args.force,
+    )
+    if result is None:
         return
+    _print_json(result)
+    logger.info(
+        "Successfully extracted file with identifier '%s' to "
+        "local pathname '%s'",
+        identifier,
+        dest,
+    )
 
+
+def _extract_to_directory(
+    config: Config,
+    identifiers: list[str],
+    dest: str,
+    args: argparse.Namespace,
+) -> None:
+    """Extract every file that matches the query into a directory."""
     args.identifier = [
         normalize_identifier(i) for i in identifiers
     ] or None
@@ -469,17 +487,84 @@ def _run_extract(config: Config, args: argparse.Namespace) -> None:
         logger.info("No files match the specified criteria")
         return
 
+    root = Path(dest)
+    if not root.is_dir():
+        raise TapestClientError(f"Directory does not exist: {dest}")
+
     logger.info("Extracting %d file(s) to '%s' ...", len(metadata_list), dest)
-    results = tapest_client.extract_files_to_directory(
-        config,
-        metadata_list,
-        dest,
-        skip=args.skip,
-        force=args.force,
-    )
-    _print_json(results)
+    extracted_count = 0
+    skipped_count = 0
+    for i, file_metadata in enumerate(metadata_list):
+        extracted = _extract_one(
+            config,
+            file_metadata,
+            root / file_metadata["identifier"].lstrip("/"),
+            _next_identifier(metadata_list, i),
+            args.skip,
+            args.force,
+        )
+        if extracted is None:
+            skipped_count += 1
+            continue
+        _print_jsonl(extracted)
+        extracted_count += 1
+    if skipped_count:
+        logger.warning(
+            "Skipped %d file(s) that are already in '%s'", skipped_count, dest
+        )
     logger.info(
-        "Successfully extracted %d file(s) to '%s'", len(results), dest
+        "Successfully extracted %d file(s) to '%s'", extracted_count, dest
+    )
+
+
+def _run_extract(config: Config, args: argparse.Namespace) -> None:
+    """Extract files from the service.
+
+    The last positional argument is the destination. It is a target file
+    when exactly one identifier is given and it is not an existing
+    directory, otherwise it is a target directory. With --prefix the
+    destination directory is the only positional argument.
+    """
+    identifiers, dest = _extract_targets(args)
+    if len(identifiers) == 1 and not Path(dest).is_dir():
+        _extract_to_file(
+            config, normalize_identifier(identifiers[0]), dest, args
+        )
+        return
+    _extract_to_directory(config, identifiers, dest, args)
+
+
+def _extract_one(
+    config: Config,
+    file_metadata: dict,
+    path: Path,
+    next_identifier: str | None,
+    skip: bool,
+    force: bool,
+) -> dict | None:
+    """Extract one file to ``path`` under --skip and --force.
+
+    Returns None for a file that is left on disk as it is.
+
+    :raises FileAlreadyExistsError: If the path is taken and neither
+        option allows it to be reused or replaced.
+    """
+    if path.exists():
+        if not (skip or force):
+            raise FileAlreadyExistsError(f"File already exists at {path}")
+        if tapest_client.is_same_file(
+            str(path), file_metadata["size"], file_metadata["checksum"]
+        ):
+            logger.info(
+                "Skipping file at local pathname '%s': already extracted",
+                path,
+            )
+            return None
+        if not force:
+            raise FileAlreadyExistsError(f"File already exists at {path}")
+        path.unlink()
+    return tapest_client.extract_file_with_metadata(
+        config, file_metadata, str(path), next_identifier
     )
 
 
@@ -592,7 +677,11 @@ def _ingest_named_file(config: Config, args: argparse.Namespace) -> None:
         local_path,
         identifier,
     )
-    result = tapest_client.ingest_file(config, identifier, local_path)
+    result = _ingest_one(
+        config, identifier, local_path, args.skip
+    )
+    if result is None:
+        return
     _print_json(result)
     logger.info(
         "Successfully ingested file with identifier '%s' from "
@@ -649,11 +738,62 @@ def _run_ingest(config: Config, args: argparse.Namespace) -> None:
 
     files = _collect_ingest_files(args.paths, args.prefix or "")
     logger.info("Ingesting %d file(s) ...", len(files))
-    results = tapest_client.ingest_files(
-        config, files, skip=args.skip, force=args.force
+    ingested_count = 0
+    skipped_count = 0
+    for identifier, local_path in files:
+        ingested = _ingest_one(config, identifier, local_path, args.skip)
+        if ingested is None:
+            skipped_count += 1
+            continue
+        _print_jsonl(ingested)
+        ingested_count += 1
+    if skipped_count:
+        logger.warning(
+            "Skipped %d file(s) that are already stored", skipped_count
+        )
+    logger.info("Successfully ingested %d file(s)", ingested_count)
+
+
+def _ingest_one(
+    config: Config,
+    identifier: str,
+    local_path: str,
+    skip: bool,
+) -> dict | None:
+    """Ingest one file, with --skip accepting a file that is stored.
+
+    With --skip the stored metadata is read first, so a file that is
+    already stored is not sent again. Without it the upload goes straight
+    out and the service answers 409 for a taken identifier.
+
+    An identifier that has been used is not free again, not even after a
+    delete, so a local file whose content differs from the stored one is
+    an error.
+
+    Returns None for a file that is already stored.
+
+    :raises FileAlreadyExistsError: If a different file has the identifier.
+    """
+    checksum = None
+    if skip:
+        checksum = tapest_client.generate_checksum(local_path)
+        existing = tapest_client.retrieve_file_metadata(
+            config, identifier, missing_ok=True
+        )
+        if existing is not None:
+            if checksum != existing.get("checksum"):
+                raise FileAlreadyExistsError(
+                    f"A different file already exists with identifier "
+                    f"{identifier}: an identifier cannot be reused"
+                )
+            logger.info(
+                "Skipping file with identifier '%s': already stored",
+                identifier,
+            )
+            return None
+    return tapest_client.ingest_file(
+        config, identifier, local_path, checksum=checksum
     )
-    _print_json(results)
-    logger.info("Successfully ingested %d file(s)", len(results))
 
 
 def main() -> None:

@@ -50,14 +50,12 @@ import os
 import time
 import urllib.parse
 from datetime import datetime, timezone
-from enum import Enum
 from pathlib import Path
 
 from collections.abc import Callable
 
 from platformdirs import user_state_path
 import requests
-from requests.exceptions import HTTPError
 from tusclient import client as tus_client
 from tusclient.exceptions import TusCommunicationError
 from tusclient.storage import filestorage
@@ -83,6 +81,14 @@ class TapestClientError(Exception):
     def __init__(self, message: str, exit_code: int = 1) -> None:
         super().__init__(message)
         self.exit_code = exit_code
+
+
+class FileAlreadyExistsError(TapestClientError, FileExistsError):
+    """Raised when a file already has the identifier or the local pathname.
+
+    Also a builtin :class:`FileExistsError`, so a caller can catch either.
+    What happens next is the caller's decision.
+    """
 
 
 # === Internal Helpers ===
@@ -310,7 +316,7 @@ def _tus_upload(
             except ValueError:
                 body = {}
             if body.get("error") != "identical_duplicate":
-                raise TapestClientError(
+                raise FileAlreadyExistsError(
                     f"A different file already exists for identifier "
                     f"{identifier}"
                 ) from error
@@ -339,6 +345,8 @@ def _tus_upload_file(
     :param path: local file URI.
     :param checksum: Pre-given checksum so that checksum calculation
         can be given during this function's call.
+    :raises FileAlreadyExistsError: If a different file is already stored
+        under the identifier. Replacing it is the caller's decision.
     :param account_name: Per-call override for ``X-TAPEST-Account``.
         Falls back to ``config.storage_account_name`` if unset.
     :param chunk_size: Size of chunks to send as part of TUS upload.
@@ -401,7 +409,6 @@ def ingest_file(
     identifier: str,
     local_file_pathname: str,
     checksum: str | None = None,
-    raise_for_status: bool = False,
     account_name: str | None = None,
 ) -> dict:
     """Ingest a local file and return its metadata.
@@ -419,8 +426,6 @@ def ingest_file(
     :param local_file_pathname: Local file URI.
     :param checksum: Pre-given checksum so that checksum calculation
         can be given during this function's call.
-    :param raise_for_status: Boolean whether requests-call response should
-        try to raise an exception.
     :param account_name: Per-call override for ``X-TAPEST-Account``.
         Falls back to ``config.storage_account_name`` if unset.
     """
@@ -478,6 +483,9 @@ def ingest_file(
         if body.get("error") == "identical_duplicate":
             # Idempotent success: return the existing file's metadata.
             return body.get("metadata") or body
+        raise FileAlreadyExistsError(
+            f"File already exists with identifier {identifier}"
+        )
     # The service refused the body as too large; retry over TUS.
     if response.status_code == 413:
         return _tus_upload_file(
@@ -487,8 +495,6 @@ def ingest_file(
             checksum=checksum,
             account_name=account_name,
         )
-    if raise_for_status:
-        response.raise_for_status()
     raise TapestClientError(
         f"Failed to ingest file {identifier}: "
         f"{response.status_code} {response.text}"
@@ -622,7 +628,7 @@ def extract_file_with_metadata(
     """
     path = Path(local_file_pathname)
     if path.exists():
-        raise TapestClientError(
+        raise FileAlreadyExistsError(
             f"File already exists at {local_file_pathname}"
         )
 
@@ -724,8 +730,12 @@ def retrieve_file_metadata(
     config: Config,
     identifier: str,
     account_name: str | None = None,
-) -> dict:
+    missing_ok: bool = False,
+) -> dict | None:
     """Retrieve metadata for a single file.
+
+    With ``missing_ok`` a file that does not exist gives None instead of
+    an error, for a caller that asks whether the identifier is free.
 
     See :func:`ingest_file` for the semantics of ``account_name``.
     """
@@ -735,6 +745,8 @@ def retrieve_file_metadata(
     response = requests.get(url, headers=headers, verify=verify_ssl)
     if response.status_code == 200:
         return response.json()
+    if missing_ok and response.status_code == 404:
+        return None
     raise TapestClientError(
         f"Failed to retrieve metadata for {identifier}: "
         f"{response.status_code} {response.text}"
@@ -807,156 +819,3 @@ def retrieve_status(config: Config) -> dict:
     raise TapestClientError(
         f"Failed to retrieve status: {response.status_code} {response.text}"
     )
-
-
-# === Batch Operation Functions ===
-
-
-def ingest_files(
-    config: Config,
-    files: list[tuple[str, str]],
-    skip: bool = False,
-    force: bool = False,
-    account_name: str | None = None,
-) -> list[dict]:
-    """Ingest a list of files with explicit identifiers.
-
-    ``files`` is a list of ``(identifier, local_pathname)`` tuples.
-    By default, an identifier that already exists on the server raises.
-    ``skip`` and ``force`` both treat a matching checksum as a silent
-    no-op; ``force`` additionally replaces files whose content differs
-    (delete + re-ingest). The checksum is computed once per file and
-    reused for both the conflict comparison and any retry PUT.
-
-    See :func:`ingest_file` for the semantics of ``account_name``.
-    """
-    ingested = []
-    for identifier, local_path in files:
-        checksum = generate_checksum(local_file_pathname=local_path)
-        try:
-            ingested.append(
-                ingest_file(
-                    config=config,
-                    identifier=identifier,
-                    local_file_pathname=local_path,
-                    checksum=checksum,
-                    raise_for_status=True,
-                    account_name=account_name,
-                )
-            )
-            continue
-        except HTTPError as err:
-            if err.response.status_code != 409:
-                raise TapestClientError(
-                    f"Failed to ingest file {identifier}: "
-                    f"{err.response.status_code} {err.response.text}"
-                ) from err
-
-        file_metadata = retrieve_file_metadata(
-            config, identifier, account_name=account_name
-        )
-        same = checksum == file_metadata["checksum"]
-        action = _conflict_action(skip, force, same)
-        if action is _ConflictAction.SKIP:
-            continue
-        if action is _ConflictAction.REPLACE:
-            delete_file(config, identifier, account_name=account_name)
-            ingested.append(
-                ingest_file(
-                    config=config,
-                    identifier=identifier,
-                    local_file_pathname=local_path,
-                    checksum=checksum,
-                    account_name=account_name,
-                )
-            )
-            continue
-
-        raise TapestClientError(
-            f"File already exists with identifier {identifier}"
-        )
-
-    return ingested
-
-
-class _ConflictAction(Enum):
-    SKIP = "skip"
-    REPLACE = "replace"
-    ERROR = "error"
-
-
-def _conflict_action(skip: bool, force: bool, same: bool) -> _ConflictAction:
-    """Resolve an existing-file conflict.
-
-    A matching checksum is a silent no-op under either ``skip`` or
-    ``force``; ``force`` additionally replaces files whose content
-    differs. Differing content under ``skip`` alone is an error.
-    """
-    if same and (skip or force):
-        return _ConflictAction.SKIP
-    if force and not same:
-        return _ConflictAction.REPLACE
-    return _ConflictAction.ERROR
-
-
-def extract_files_to_directory(
-    config: Config,
-    metadata: list[dict],
-    local_directory_pathname: str,
-    skip: bool = False,
-    force: bool = False,
-    account_name: str | None = None,
-) -> list[dict]:
-    """Extract files described in metadata list to a directory tree.
-
-    See :func:`ingest_file` for the semantics of ``account_name``.
-    """
-    root = Path(local_directory_pathname)
-    if not root.is_dir():
-        raise TapestClientError(
-            f"Directory does not exist: {local_directory_pathname}"
-        )
-
-    extracted = []
-    for i, file_metadata in enumerate(metadata):
-        identifier = file_metadata["identifier"]
-        next_id = (
-            metadata[i + 1]["identifier"] if i + 1 < len(metadata) else None
-        )
-        path = root / identifier.lstrip("/")
-
-        if not path.exists():
-            extracted.append(
-                extract_file_with_metadata(
-                    config,
-                    file_metadata,
-                    str(path),
-                    next_id,
-                    account_name=account_name,
-                )
-            )
-            continue
-        if not (skip or force):
-            # Raise before hashing; is_same_file reads the whole file.
-            raise TapestClientError(f"File already exists at {path}")
-        same = is_same_file(
-            str(path), file_metadata["size"], file_metadata["checksum"]
-        )
-        action = _conflict_action(skip, force, same)
-        if action is _ConflictAction.SKIP:
-            continue
-        if action is _ConflictAction.REPLACE:
-            path.unlink()
-            extracted.append(
-                extract_file_with_metadata(
-                    config,
-                    file_metadata,
-                    str(path),
-                    next_id,
-                    account_name=account_name,
-                )
-            )
-            continue
-        raise TapestClientError(f"File already exists at {path}")
-
-    return extracted

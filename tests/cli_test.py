@@ -20,7 +20,11 @@ from tapest_client.cli import (
     _run_query_metadata,
     _run_update_metadata,
 )
-from tapest_client import TapestClientError
+from tapest_client import (
+    FileAlreadyExistsError,
+    TapestClientError,
+    generate_checksum,
+)
 
 
 def _metadata_args(**overrides):
@@ -42,12 +46,23 @@ def _metadata_args(**overrides):
     return SimpleNamespace(**defaults)
 
 
+def _jsonl(capsys):
+    """Parse the stdout of a batch command, one JSON record per line."""
+    return [
+        json.loads(line) for line in capsys.readouterr().out.splitlines()
+    ]
+
+
+def _ingested(cli_fx):
+    """Return the (identifier, path) pairs sent to ingest_file."""
+    return [args for args, _ in cli_fx.calls["ingest_file"]]
+
+
 def _ingest_args(**overrides):
     """Build an ingest args namespace with sensible defaults."""
     defaults = dict(
         paths=[],
         skip=False,
-        force=False,
         prefix=None,
         identifier=None,
     )
@@ -148,7 +163,7 @@ def test_metadata_query_parses_parent():
 
 
 def test_ingest_parses_options():
-    """ingest parses one-or-more paths plus --prefix/--skip/--force."""
+    """ingest parses one-or-more paths plus --prefix and --skip."""
     args = build_parser().parse_args(
         [
             "ingest",
@@ -163,7 +178,12 @@ def test_ingest_parses_options():
     assert args.paths == ["/path/a.dat", "/path/b.dat", "/path/dir1"]
     assert args.prefix == "acme"
     assert args.skip is True
-    assert args.force is False
+
+
+def test_ingest_has_no_force_option():
+    """ingest has no --force: a stored identifier cannot be replaced."""
+    with pytest.raises(SystemExit):
+        build_parser().parse_args(["ingest", "--force", "/path/a.dat"])
 
 
 def test_extract_with_next_id():
@@ -197,7 +217,7 @@ def test_ingest_with_identifier_calls_library(
         skip=False, force=False,
     )
     _run_ingest(config_fx(), args)
-    assert cli_fx.calls["ingest_file"] == [(("/id", str(path)), {})]
+    assert _ingested(cli_fx) == [("/id", str(path))]
     assert json.loads(capsys.readouterr().out)["identifier"] == "/id"
 
 
@@ -213,7 +233,7 @@ def test_ingest_identifier_normalizes_leading_slash(
         skip=False, force=False,
     )
     _run_ingest(config_fx(), args)
-    assert cli_fx.calls["ingest_file"] == [(("/id", str(path)), {})]
+    assert _ingested(cli_fx) == [("/id", str(path))]
 
 
 def test_ingest_identifier_needs_exactly_one_path(config_fx, cli_fx):
@@ -227,18 +247,43 @@ def test_ingest_identifier_needs_exactly_one_path(config_fx, cli_fx):
         _run_ingest(config_fx(), args)
 
 
-def test_extract_one_identifier_to_a_file(config_fx, cli_fx):
+def test_extract_one_identifier_to_a_file(tmp_path, config_fx, cli_fx):
     """One identifier and a destination that is not a directory give a
     single file."""
-    cli_fx("extract_file", return_value={"identifier": "/id"})
+    metadata = {"identifier": "/id", "size": 1, "checksum": "sha256:x"}
+    dest = tmp_path / "out.dat"
+    cli_fx("retrieve_file_metadata", return_value=metadata)
+    cli_fx("extract_file_with_metadata", return_value=metadata)
     args = SimpleNamespace(
-        args=["/id", "/path"], prefix=None, next_file_id=None,
+        args=["/id", str(dest)], prefix=None, next_file_id=None,
         skip=False, force=False,
     )
     _run_extract(config_fx(), args)
-    assert cli_fx.calls["extract_file"] == [
-        (("/id", "/path"), {"next_identifier": None})
+    assert cli_fx.calls["extract_file_with_metadata"] == [
+        ((metadata, str(dest), None), {})
     ]
+
+
+def test_extract_one_identifier_skips_a_matching_file(
+    tmp_path, config_fx, cli_fx, capsys
+):
+    """--skip works for one named file, not only for a directory tree."""
+    dest = tmp_path / "out.dat"
+    dest.write_bytes(b"hello world")
+    metadata = {
+        "identifier": "/id",
+        "size": 11,
+        "checksum": generate_checksum(dest),
+    }
+    cli_fx("retrieve_file_metadata", return_value=metadata)
+    cli_fx("extract_file_with_metadata")
+    args = SimpleNamespace(
+        args=["/id", str(dest)], prefix=None, next_file_id=None,
+        skip=True, force=False,
+    )
+    _run_extract(config_fx(), args)
+    assert cli_fx.calls["extract_file_with_metadata"] == []
+    assert capsys.readouterr().out == ""
 
 
 def test_extract_needs_a_destination(config_fx, cli_fx):
@@ -439,20 +484,17 @@ def test_update_metadata(config_fx, cli_fx, capsys):
 # -- Batch operations ---------------------------------------------------------
 
 
-def test_ingest_files(tmp_path, monkeypatch, config_fx, cli_fx):
+def test_ingest_paths_become_identifiers(
+    tmp_path, monkeypatch, config_fx, cli_fx
+):
     """Plain file paths become identifiers built from the path-as-given."""
     monkeypatch.chdir(tmp_path)
     (tmp_path / "a.dat").write_bytes(b"a")
     (tmp_path / "b.dat").write_bytes(b"b")
-    cli_fx("ingest_files", return_value=[])
+    cli_fx("ingest_file", return_value={})
     args = _ingest_args(paths=["a.dat", "b.dat"])
     _run_ingest(config_fx(), args)
-    assert cli_fx.calls["ingest_files"] == [
-        (
-            ([("/a.dat", "a.dat"), ("/b.dat", "b.dat")],),
-            {"skip": False, "force": False},
-        )
-    ]
+    assert _ingested(cli_fx) == [("/a.dat", "a.dat"), ("/b.dat", "b.dat")]
 
 
 def test_ingest_directory(tmp_path, monkeypatch, config_fx, cli_fx):
@@ -463,19 +505,12 @@ def test_ingest_directory(tmp_path, monkeypatch, config_fx, cli_fx):
     (d / "a.dat").write_bytes(b"a")
     (d / "sub").mkdir()
     (d / "sub" / "b.dat").write_bytes(b"b")
-    cli_fx("ingest_files", return_value=[])
+    cli_fx("ingest_file", return_value={})
     args = _ingest_args(paths=["acme"])
     _run_ingest(config_fx(), args)
-    assert cli_fx.calls["ingest_files"] == [
-        (
-            (
-                [
-                    ("/acme/a.dat", "acme/a.dat"),
-                    ("/acme/sub/b.dat", "acme/sub/b.dat"),
-                ],
-            ),
-            {"skip": False, "force": False},
-        )
+    assert _ingested(cli_fx) == [
+        ("/acme/a.dat", "acme/a.dat"),
+        ("/acme/sub/b.dat", "acme/sub/b.dat"),
     ]
 
 
@@ -489,19 +524,12 @@ def test_ingest_cwd_dot(tmp_path, monkeypatch, config_fx, cli_fx):
     (tmp_path / "a.dat").write_bytes(b"a")
     (tmp_path / "sub").mkdir()
     (tmp_path / "sub" / "b.dat").write_bytes(b"b")
-    cli_fx("ingest_files", return_value=[])
+    cli_fx("ingest_file", return_value={})
     args = _ingest_args(paths=["."])
     _run_ingest(config_fx(), args)
-    assert cli_fx.calls["ingest_files"] == [
-        (
-            (
-                [
-                    ("/a.dat", "a.dat"),
-                    ("/sub/b.dat", "sub/b.dat"),
-                ],
-            ),
-            {"skip": False, "force": False},
-        )
+    assert _ingested(cli_fx) == [
+        ("/a.dat", "a.dat"),
+        ("/sub/b.dat", "sub/b.dat"),
     ]
 
 
@@ -512,14 +540,12 @@ def test_ingest_mixed(tmp_path, monkeypatch, config_fx, cli_fx):
     d = tmp_path / "dir1"
     d.mkdir()
     (d / "in.dat").write_bytes(b"y")
-    cli_fx("ingest_files", return_value=[])
+    cli_fx("ingest_file", return_value={})
     args = _ingest_args(paths=["loose.dat", "dir1"])
     _run_ingest(config_fx(), args)
-    assert cli_fx.calls["ingest_files"] == [
-        (
-            ([("/loose.dat", "loose.dat"), ("/dir1/in.dat", "dir1/in.dat")],),
-            {"skip": False, "force": False},
-        )
+    assert _ingested(cli_fx) == [
+        ("/loose.dat", "loose.dat"),
+        ("/dir1/in.dat", "dir1/in.dat"),
     ]
 
 
@@ -530,19 +556,12 @@ def test_ingest_with_prefix(tmp_path, monkeypatch, config_fx, cli_fx):
     d = tmp_path / "dir1"
     d.mkdir()
     (d / "b.dat").write_bytes(b"b")
-    cli_fx("ingest_files", return_value=[])
+    cli_fx("ingest_file", return_value={})
     args = _ingest_args(paths=["a.dat", "dir1"], prefix="acme/2024")
     _run_ingest(config_fx(), args)
-    assert cli_fx.calls["ingest_files"] == [
-        (
-            (
-                [
-                    ("/acme/2024/a.dat", "a.dat"),
-                    ("/acme/2024/dir1/b.dat", "dir1/b.dat"),
-                ],
-            ),
-            {"skip": False, "force": False},
-        )
+    assert _ingested(cli_fx) == [
+        ("/acme/2024/a.dat", "a.dat"),
+        ("/acme/2024/dir1/b.dat", "dir1/b.dat"),
     ]
 
 
@@ -563,27 +582,40 @@ def test_ingest_prefix_normalization(
     """--prefix is normalized to a single leading '/' with no trailing '/'."""
     monkeypatch.chdir(tmp_path)
     (tmp_path / "a.dat").write_bytes(b"a")
-    cli_fx("ingest_files", return_value=[])
+    cli_fx("ingest_file", return_value={})
     args = _ingest_args(paths=["a.dat"], prefix=prefix_input)
     _run_ingest(config_fx(), args)
-    assert cli_fx.calls["ingest_files"][0][0][0] == [
-        ("/acme/2024/a.dat", "a.dat")
+    assert _ingested(cli_fx) == [("/acme/2024/a.dat", "a.dat")]
+
+
+def test_extract_files(tmp_path, config_fx, cli_fx, capsys):
+    """extract queries metadata then extracts each matching file.
+
+    Every file but the last carries the next identifier, which lets the
+    service stage the following file while this one is written.
+    """
+    metadata = [{"identifier": "/a"}, {"identifier": "/b"}]
+    cli_fx("retrieve_metadata", return_value={"metadata": metadata})
+    cli_fx("extract_file_with_metadata", return_value={"identifier": "/a"})
+    _run_extract(config_fx(), _extract_args(tmp_path))
+    assert cli_fx.calls["extract_file_with_metadata"] == [
+        ((metadata[0], str(tmp_path / "a"), "/b"), {}),
+        ((metadata[1], str(tmp_path / "b"), None), {}),
     ]
+    assert len(_jsonl(capsys)) == 2
 
 
-def test_extract_files(config_fx, cli_fx, capsys):
-    """extract queries metadata then extracts matching files."""
-    metadata = {"metadata": [{"identifier": "/a"}, {"identifier": "/b"}]}
-    cli_fx("retrieve_metadata", return_value=metadata)
-    cli_fx("extract_files_to_directory", return_value=[{"identifier": "/a"}])
-    args = SimpleNamespace(
-        args=["/dir"],
+def _extract_args(dest, **overrides):
+    """Build an extract args namespace for a destination directory."""
+    defaults = dict(
+        args=[str(dest)],
         prefix=["pfx"],
         next_file_id=None,
         skip=False,
         force=False,
     )
-    _run_extract(config_fx(), args)
+    defaults.update(overrides)
+    return SimpleNamespace(**defaults)
 
 
 def test_extract_files_requires_source(config_fx):
@@ -645,3 +677,192 @@ def test_load_config_host_override(tmp_path):
         config=str(conf), host="https://override", ca_cert=None
     )
     assert _load_config(args).host == "https://override"
+
+
+# -- Conflict policy: --skip and --force --------------------------------------
+
+
+def test_ingest_skip_sends_nothing_for_a_stored_file(
+    tmp_path, config_fx, cli_fx, capsys
+):
+    """--skip sends nothing for a file that is already stored."""
+    path = tmp_path / "a.dat"
+    path.write_bytes(b"hello world")
+    stored = {"identifier": "/a.dat", "checksum": generate_checksum(path)}
+    cli_fx("retrieve_file_metadata", return_value=stored)
+    cli_fx("ingest_file")
+    _run_ingest(
+        config_fx(),
+        _ingest_args(paths=[str(path)], identifier="/a.dat", skip=True),
+    )
+    assert cli_fx.calls["ingest_file"] == []
+    assert capsys.readouterr().out == ""
+
+
+def test_ingest_skip_leaves_stored_files_out_of_the_results(
+    tmp_path, monkeypatch, config_fx, cli_fx, capsys
+):
+    """The printed results are the files that the client sent."""
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "a.dat").write_bytes(b"stored already")
+    cli_fx(
+        "retrieve_file_metadata",
+        return_value={
+            "identifier": "/a.dat",
+            "checksum": generate_checksum(tmp_path / "a.dat"),
+        },
+    )
+    cli_fx("ingest_file")
+    _run_ingest(config_fx(), _ingest_args(paths=["a.dat"], skip=True))
+    assert cli_fx.calls["ingest_file"] == []
+    assert _jsonl(capsys) == []
+
+
+def test_ingest_reports_how_many_files_were_skipped(
+    tmp_path, monkeypatch, config_fx, cli_fx, caplog
+):
+    """A skipped file is counted in one line that shows without -v."""
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "a.dat").write_bytes(b"stored already")
+    cli_fx(
+        "retrieve_file_metadata",
+        return_value={
+            "identifier": "/a.dat",
+            "checksum": generate_checksum(tmp_path / "a.dat"),
+        },
+    )
+    cli_fx("ingest_file")
+    with caplog.at_level("WARNING", logger="tapest-client"):
+        _run_ingest(config_fx(), _ingest_args(paths=["a.dat"], skip=True))
+    assert "Skipped 1 file(s) that are already stored" in caplog.text
+
+
+def test_ingest_prints_one_json_line_per_file(
+    tmp_path, monkeypatch, config_fx, cli_fx, capsys
+):
+    """Each file is printed when it is done, not after the whole batch."""
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "a.dat").write_bytes(b"a")
+    (tmp_path / "b.dat").write_bytes(b"b")
+    cli_fx("ingest_file", return_value={"identifier": "/x"})
+    _run_ingest(config_fx(), _ingest_args(paths=["a.dat", "b.dat"]))
+    assert _jsonl(capsys) == [{"identifier": "/x"}, {"identifier": "/x"}]
+
+
+def test_ingest_never_deletes_a_stored_file(tmp_path, config_fx, cli_fx):
+    """The client does not delete a stored file to reuse its identifier.
+
+    An identifier that has been used is not free again, not even after a
+    delete, so a local file that differs is an error.
+    """
+    path = tmp_path / "a.dat"
+    path.write_bytes(b"hello world")
+    cli_fx(
+        "retrieve_file_metadata",
+        return_value={"identifier": "/a.dat", "checksum": "sha256:old"},
+    )
+    cli_fx("delete_file")
+    cli_fx("ingest_file")
+    with pytest.raises(FileAlreadyExistsError, match="cannot be reused"):
+        _run_ingest(
+            config_fx(),
+            _ingest_args(paths=[str(path)], identifier="/a.dat", skip=True),
+        )
+    assert cli_fx.calls["delete_file"] == []
+    assert cli_fx.calls["ingest_file"] == []
+
+
+def test_ingest_free_identifier_is_uploaded_under_skip(
+    tmp_path, config_fx, cli_fx
+):
+    """A 404 from the check means the identifier is free: upload."""
+    path = tmp_path / "a.dat"
+    path.write_bytes(b"hello world")
+    cli_fx("retrieve_file_metadata", return_value=None)
+    cli_fx("ingest_file", return_value={"identifier": "/a.dat"})
+    _run_ingest(
+        config_fx(),
+        _ingest_args(paths=[str(path)], identifier="/a.dat", skip=True),
+    )
+    assert cli_fx.calls["ingest_file"] == [
+        (("/a.dat", str(path)), {"checksum": generate_checksum(path)})
+    ]
+
+
+def test_ingest_without_options_reads_no_metadata(
+    tmp_path, config_fx, cli_fx
+):
+    """A plain ingest is one request; the 409 settles a duplicate."""
+    path = tmp_path / "a.dat"
+    path.write_bytes(b"hello world")
+    cli_fx("retrieve_file_metadata")
+    cli_fx("ingest_file", return_value={"identifier": "/a.dat"})
+    _run_ingest(
+        config_fx(), _ingest_args(paths=[str(path)], identifier="/a.dat")
+    )
+    assert cli_fx.calls["retrieve_file_metadata"] == []
+    assert cli_fx.calls["ingest_file"] == [
+        (("/a.dat", str(path)), {"checksum": None})
+    ]
+
+
+def test_extract_skip_leaves_a_matching_file(
+    tmp_path, config_fx, cli_fx, capsys
+):
+    """--skip leaves a local file that matches size and checksum."""
+    local = tmp_path / "a.dat"
+    local.write_bytes(b"hello world")
+    metadata = {
+        "identifier": "/a.dat",
+        "size": 11,
+        "checksum": generate_checksum(local),
+    }
+    cli_fx("retrieve_metadata", return_value={"metadata": [metadata]})
+    cli_fx("extract_file_with_metadata")
+    _run_extract(config_fx(), _extract_args(tmp_path, skip=True))
+    assert cli_fx.calls["extract_file_with_metadata"] == []
+    assert _jsonl(capsys) == []
+
+
+def test_extract_force_replaces_a_different_file(
+    tmp_path, config_fx, cli_fx
+):
+    """--force removes the local file before extracting over it."""
+    local = tmp_path / "a.dat"
+    local.write_bytes(b"stale")
+    metadata = {
+        "identifier": "/a.dat",
+        "size": 11,
+        "checksum": "sha256:other",
+    }
+    cli_fx("retrieve_metadata", return_value={"metadata": [metadata]})
+    cli_fx("extract_file_with_metadata", return_value=metadata)
+    _run_extract(config_fx(), _extract_args(tmp_path, force=True))
+    assert not local.exists()
+    assert cli_fx.calls["extract_file_with_metadata"] == [
+        ((metadata, str(local), None), {})
+    ]
+
+
+def test_extract_existing_file_raises_without_options(
+    tmp_path, config_fx, cli_fx
+):
+    """A taken local pathname is an error unless --skip or --force is given."""
+    local = tmp_path / "a.dat"
+    local.write_bytes(b"stale")
+    metadata = {"identifier": "/a.dat", "size": 11, "checksum": "sha256:x"}
+    cli_fx("retrieve_metadata", return_value={"metadata": [metadata]})
+    cli_fx("extract_file_with_metadata")
+    with pytest.raises(FileAlreadyExistsError, match="already exists"):
+        _run_extract(config_fx(), _extract_args(tmp_path))
+    assert cli_fx.calls["extract_file_with_metadata"] == []
+
+
+def test_extract_missing_destination_directory(tmp_path, config_fx, cli_fx):
+    """The destination directory has to exist before any file is written."""
+    metadata = {"identifier": "/a.dat", "size": 11, "checksum": "sha256:x"}
+    cli_fx("retrieve_metadata", return_value={"metadata": [metadata]})
+    cli_fx("extract_file_with_metadata")
+    with pytest.raises(TapestClientError, match="does not exist"):
+        _run_extract(config_fx(), _extract_args(tmp_path / "nope"))
+    assert cli_fx.calls["extract_file_with_metadata"] == []
