@@ -57,7 +57,10 @@ from collections.abc import Callable
 from platformdirs import user_state_path
 import requests
 from tusclient import client as tus_client
-from tusclient.exceptions import TusCommunicationError
+from tusclient.exceptions import (
+    TusCommunicationError,
+    TusUploadFailed,
+)
 from tusclient.storage import filestorage
 
 from tapest_client.config import Config
@@ -254,6 +257,43 @@ def _tus_storage_path(identifier: str) -> Path:
     return user_state_path("tapest-client") / "tus_storage.d" / digest
 
 
+def _conflict_error_document(error: TusCommunicationError) -> dict | None:
+    """Return the JSON error document of a 409, or None if it carried none."""
+    if not isinstance(error.response_content, (bytes, str)):
+        return None
+    try:
+        document = json.loads(error.response_content)
+    except ValueError:
+        return None
+    return document if isinstance(document, dict) else None
+
+
+def _raise_for_upload_error(
+    error: TusCommunicationError, identifier: str
+) -> None:
+    """Re-raise a failed upload as the condition its 409 reports.
+
+    Returns only for an identical duplicate, which is a success.
+    """
+    document = _conflict_error_document(error)
+    # Only flask-tus-io answers 409 without a document, and only over a chunk.
+    refused_offset = document is None and isinstance(error, TusUploadFailed)
+    duplicate = (document or {}).get("error") == "identical_duplicate"
+    if error.status_code == 409 and refused_offset:
+        raise TapestClientError(
+            f"The server refused a chunk of {identifier} with 409. The "
+            f"chunk was probably sent at the wrong offset, so the upload "
+            f"can be run again."
+        ) from error
+    if error.status_code == 409 and duplicate:
+        return
+    if error.status_code == 409:
+        raise FileAlreadyExistsError(
+            f"A different file already exists for identifier {identifier}"
+        ) from error
+    raise error
+
+
 # === Core Operation Functions ===
 
 
@@ -306,22 +346,10 @@ def _tus_upload(
         url_storage=storage,
         verify_tls_cert=_verify_param(config),
     )
-    # A 409 with the identical-duplicate marker is an idempotent success.
     try:
         uploader.upload()
     except TusCommunicationError as error:
-        if error.status_code == 409:
-            try:
-                body = json.loads(error.response_content or b"{}")
-            except ValueError:
-                body = {}
-            if body.get("error") != "identical_duplicate":
-                raise FileAlreadyExistsError(
-                    f"A different file already exists for identifier "
-                    f"{identifier}"
-                ) from error
-        else:
-            raise
+        _raise_for_upload_error(error=error, identifier=identifier)
     storage_path.unlink(missing_ok=True)
     return retrieve_file_metadata(
         config=config,

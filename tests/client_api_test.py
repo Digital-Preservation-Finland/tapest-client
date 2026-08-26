@@ -6,9 +6,12 @@ responses. All HTTP calls are mocked via the ``requests_fx`` fixture.
 """
 
 
+import re
 from base64 import b64encode
 
 import pytest
+from tusclient.exceptions import TusCommunicationError
+
 from tapest_client import client
 from tapest_client.client import (
     _tus_storage_path,
@@ -378,6 +381,78 @@ def test_tus_upload(tmp_path, config_fx):
         path=str(path),
         chunk_size="16.12 MiB",
     )
+
+
+def test_tus_offset_conflict_is_not_reported_as_a_duplicate(
+    tmp_path, config_fx, mock_tus_endpoints
+):
+    """TUS answers 409 to a chunk at an offset the server does not hold.
+    The message must not claim another file exists under the identifier.
+    """
+    path = tmp_path / "big.dat"
+    path.write_bytes(b"x" * 64)
+    mock_tus_endpoints.patch(
+        re.compile(f"^{config_fx().host}/tus"), text="", status_code=409
+    )
+    with pytest.raises(TapestClientError) as error:
+        _tus_upload_file(
+            config=config_fx(), identifier="/big.dat", path=str(path)
+        )
+    assert "offset" in str(error.value)
+    assert "already exists" not in str(error.value)
+
+
+def test_tus_conflict_document_over_a_chunk_reports_a_duplicate(
+    tmp_path, config_fx, mock_tus_endpoints
+):
+    """A conflict can surface over a chunk, and arrives as an error document.
+    No field of it is read.
+    """
+    path = tmp_path / "big.dat"
+    path.write_bytes(b"x" * 64)
+    mock_tus_endpoints.patch(
+        re.compile(f"^{config_fx().host}/tus"),
+        json={"an unread field": "of the service's own error document"},
+        status_code=409,
+    )
+    with pytest.raises(FileAlreadyExistsError, match="already exists"):
+        _tus_upload_file(
+            config=config_fx(), identifier="/big.dat", path=str(path)
+        )
+
+
+def test_tus_bodyless_conflict_at_creation_is_not_an_offset_refusal(
+    tmp_path, config_fx, mock_tus_endpoints
+):
+    """An upload that has not started has no offset to refuse, so a 409 to the
+    creation request is a conflict at the identifier however thin its body.
+    """
+    path = tmp_path / "big.dat"
+    path.write_bytes(b"x" * 64)
+    mock_tus_endpoints.post(
+        f"{config_fx().host}/tus", text="", status_code=409
+    )
+    with pytest.raises(FileAlreadyExistsError, match="already exists"):
+        _tus_upload_file(
+            config=config_fx(), identifier="/big.dat", path=str(path)
+        )
+
+
+def test_tus_failure_that_is_not_a_conflict_is_left_as_it_is(
+    tmp_path, config_fx, mock_tus_endpoints
+):
+    """Only a 409 is renamed, other failures reach the caller as tuspy raised
+    them.
+    """
+    path = tmp_path / "big.dat"
+    path.write_bytes(b"x" * 64)
+    mock_tus_endpoints.patch(
+        re.compile(f"^{config_fx().host}/tus"), text="", status_code=500
+    )
+    with pytest.raises(TusCommunicationError):
+        _tus_upload_file(
+            config=config_fx(), identifier="/big.dat", path=str(path)
+        )
 
 
 # === TUS resume-state files ===
