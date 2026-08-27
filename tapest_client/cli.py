@@ -342,6 +342,49 @@ def _print_jsonl(data: object) -> None:
 _COPY_MARKS = ("stored", "checked", "queued", "required", "extracted")
 
 
+def _print_metadata_item_header(item: dict) -> None:
+    """Print the identifier/size/flags header line for one file item."""
+    header = f"{item.get('identifier', '?')}  ({item.get('size', '')} B)"
+    if item.get("ingested"):
+        header += f"  ingested={item['ingested']}"
+    if item.get("recached"):
+        header += f"  recached={item['recached']}"
+    print(header)
+
+
+def _print_metadata_copy_line(name: str, copy: dict, name_w: int) -> None:
+    """Print a single storage-copy row of the per-file copies table."""
+    marks = "  ".join(
+        f"{'✓' if copy.get(m) else '·':>4}" for m in _COPY_MARKS
+    )
+    errs = len(copy.get("errors") or [])
+    sm = copy.get("storage_metadata")
+    sm_str = f"  {sm}" if sm else ""
+    print(f"  {name:<{name_w}}  {marks}  {errs:>4}{sm_str}")
+
+
+def _print_metadata_copies(copies: dict) -> None:
+    """Print the copies table for one file item, or a placeholder."""
+    if not copies:
+        print("  (no copies)")
+        return
+    name_w = max(len("storage"), *(len(n) for n in copies))
+    cols = "  ".join(f"{m[:4]:>4}" for m in _COPY_MARKS)
+    print(f"  {'storage':<{name_w}}  {cols}  errs")
+    for name, copy in sorted(copies.items()):
+        _print_metadata_copy_line(name, copy, name_w)
+
+
+def _print_metadata_footer(result: dict, items: list) -> None:
+    """Print the trailing files/pending/errors summary line, if present."""
+    if "files" in result:
+        print(
+            f"\n{result.get('files', len(items))} files, "
+            f"{result.get('filesPending', 0)} pending, "
+            f"{result.get('filesWithErrors', 0)} with errors"
+        )
+
+
 def _print_metadata_table(result: dict) -> None:
     """Render a per-file, per-copy summary table to stdout.
 
@@ -361,34 +404,10 @@ def _print_metadata_table(result: dict) -> None:
         return
 
     for item in items:
-        header = f"{item.get('identifier', '?')}  ({item.get('size', '')} B)"
-        if item.get("ingested"):
-            header += f"  ingested={item['ingested']}"
-        if item.get("recached"):
-            header += f"  recached={item['recached']}"
-        print(header)
-        copies = item.get("copies") or {}
-        if not copies:
-            print("  (no copies)")
-            continue
-        name_w = max(len("storage"), *(len(n) for n in copies))
-        cols = "  ".join(f"{m[:4]:>4}" for m in _COPY_MARKS)
-        print(f"  {'storage':<{name_w}}  {cols}  errs")
-        for name, copy in sorted(copies.items()):
-            marks = "  ".join(
-                f"{'✓' if copy.get(m) else '·':>4}" for m in _COPY_MARKS
-            )
-            errs = len(copy.get("errors") or [])
-            sm = copy.get("storage_metadata")
-            sm_str = f"  {sm}" if sm else ""
-            print(f"  {name:<{name_w}}  {marks}  {errs:>4}{sm_str}")
+        _print_metadata_item_header(item)
+        _print_metadata_copies(item.get("copies") or {})
 
-    if "files" in result:
-        print(
-            f"\n{result.get('files', len(items))} files, "
-            f"{result.get('filesPending', 0)} pending, "
-            f"{result.get('filesWithErrors', 0)} with errors"
-        )
+    _print_metadata_footer(result, items)
 
 
 # -- Subcommand handlers -----------------------------------------------------
