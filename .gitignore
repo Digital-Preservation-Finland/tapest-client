@@ -19,6 +19,7 @@ htmlcov/
 coverage.xml
 *.cover
 .pytest_cache/
+junit.xml
 
 # Environments
 .env

@@ -380,9 +380,7 @@ def _print_metadata_table(result: dict) -> None:
             )
             errs = len(copy.get("errors") or [])
             sm = copy.get("storage_metadata")
-            sm_str = (
-                f"  {json.dumps(sm, separators=(',', ':'))}" if sm else ""
-            )
+            sm_str = f"  {sm}" if sm else ""
             print(f"  {name:<{name_w}}  {marks}  {errs:>4}{sm_str}")
 
     if "files" in result:
