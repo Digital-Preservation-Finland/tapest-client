@@ -5,6 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
+import tapest_client
 from tapest_client.cli import (
     build_parser,
     main,
@@ -203,6 +204,20 @@ def test_status(config_fx, cli_fx, capsys):
     cli_fx("retrieve_status", return_value={"status": "ok"})
     _run_status(config_fx(), SimpleNamespace())
     assert json.loads(capsys.readouterr().out)["status"] == "ok"
+
+
+def test_status_reports_the_client_version(config_fx, cli_fx, capsys):
+    """status handler reports the client version next to the service
+    response, so the two versions cannot be confused."""
+    cli_fx(
+        "retrieve_status", return_value={"tapest_api_version": "1.2.3"}
+    )
+    _run_status(config_fx(), SimpleNamespace())
+    output = json.loads(capsys.readouterr().out)
+    assert output == {
+        "tapest_client_version": tapest_client.__version__,
+        "tapest_api_version": "1.2.3",
+    }
 
 
 def test_ingest_with_identifier_calls_library(

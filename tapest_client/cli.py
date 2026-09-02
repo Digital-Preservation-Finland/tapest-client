@@ -428,10 +428,16 @@ def _run_write_config(
 
 
 def _run_status(config: Config, args: argparse.Namespace) -> None:
-    """Retrieve service status."""
+    """Retrieve service status.
+
+    The client version is reported alongside the service response, so that a
+    single command answers which client is talking to which service.
+    """
     logger.info("Retrieving service status ...")
     result = tapest_client.retrieve_status(config)
-    _print_json(result)
+    _print_json(
+        {"tapest_client_version": tapest_client.__version__, **result}
+    )
     logger.info("Service status retrieved successfully")
 
 
