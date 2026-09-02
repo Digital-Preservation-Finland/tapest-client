@@ -63,7 +63,6 @@ DEFAULT_CONFIG = json.dumps(dataclasses.asdict(Config()), indent=2) + "\n"
 
 METADATA_ORDER_CHOICES = [
     "identifier",
-    "storage",
     "ingested",
     "stored",
     "checked",
@@ -388,9 +387,9 @@ def _print_metadata_footer(result: dict, items: list) -> None:
 def _print_metadata_table(result: dict) -> None:
     """Render a per-file, per-copy summary table to stdout.
 
-    Falls back to JSON for split results (``metadata`` is None) or any shape
-    without a flat metadata list. Accepts either a query envelope (with a
-    ``metadata`` list) or a single file document.
+    Falls back to JSON when there is no flat metadata list, for example a
+    directory listing where ``metadata`` is None. Accepts either a query
+    envelope (with a ``metadata`` list) or a single file document.
     """
     if "metadata" in result:
         items = result.get("metadata")

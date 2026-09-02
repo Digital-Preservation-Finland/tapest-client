@@ -404,8 +404,9 @@ def test_metadata_order_choices_synced():
     obsolete 'required' gone."""
     assert "queued" in METADATA_ORDER_CHOICES
     assert "required" not in METADATA_ORDER_CHOICES
+    assert "storage" not in METADATA_ORDER_CHOICES
     assert set(METADATA_ORDER_CHOICES) == {
-        "identifier", "storage", "ingested", "stored",
+        "identifier", "ingested", "stored",
         "checked", "recached", "extracted", "queued",
     }
 
@@ -428,15 +429,6 @@ def test_query_metadata_copy_order_with_storage_ok(config_fx, cli_fx):
         config_fx(), _metadata_args(order="stored", storage="kaj_lt9")
     )
     assert cli_fx.calls["retrieve_metadata"][0][1]["storage_name"] == "kaj_lt9"
-
-
-def test_query_metadata_storage_order_no_storage_ok(config_fx, cli_fx):
-    """order=storage (tape-layout ordering) is allowed without --storage."""
-    cli_fx("retrieve_metadata", return_value={"metadata": []})
-    _run_query_metadata(config_fx(), _metadata_args(order="storage"))
-    assert cli_fx.calls["retrieve_metadata"][0][1]["query"][
-        "order_by"
-    ] == "storage"
 
 
 def test_query_metadata_ingested_order_no_storage_ok(config_fx, cli_fx):
@@ -474,9 +466,9 @@ def test_query_metadata_table_format(config_fx, cli_fx, capsys):
     assert "1 files, 1 pending" in out
 
 
-def test_print_metadata_table_split_falls_back_to_json(capsys):
-    """Split results (metadata is None) fall back to JSON output."""
-    _print_metadata_table({"metadata": None, "metadataSplits": [[]]})
+def test_print_metadata_table_none_falls_back_to_json(capsys):
+    """A listing with no flat metadata list falls back to JSON output."""
+    _print_metadata_table({"metadata": None, "commonPrefixes": ["/p/"]})
     assert json.loads(capsys.readouterr().out)["metadata"] is None
 
 
