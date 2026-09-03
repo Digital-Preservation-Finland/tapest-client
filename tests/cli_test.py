@@ -40,7 +40,10 @@ def _metadata_args(**overrides):
         pending=False,
         errors=False,
         order=None,
+        desc=False,
         limit=None,
+        cursor=None,
+        count=False,
         format="json",
     )
     defaults.update(overrides)
@@ -466,10 +469,74 @@ def test_query_metadata_table_format(config_fx, cli_fx, capsys):
     assert "1 files, 1 pending" in out
 
 
-def test_print_metadata_table_none_falls_back_to_json(capsys):
-    """A listing with no flat metadata list falls back to JSON output."""
-    _print_metadata_table({"metadata": None, "commonPrefixes": ["/p/"]})
+def test_print_metadata_table_renders_common_prefixes(capsys):
+    """A one-level listing shows child directories when metadata is None."""
+    _print_metadata_table(
+        {"files": 0, "metadata": None, "commonPrefixes": ["/p/", "/q/"]}
+    )
+    out = capsys.readouterr().out
+    assert "/p/  (directory)" in out
+    assert "/q/  (directory)" in out
+
+
+def test_print_metadata_table_no_data_falls_back_to_json(capsys):
+    """With neither a metadata list nor common prefixes, fall back to JSON."""
+    _print_metadata_table({"metadata": None})
     assert json.loads(capsys.readouterr().out)["metadata"] is None
+
+
+def test_print_metadata_table_shows_next_cursor(capsys):
+    """A page with a nextCursor prints it in the footer."""
+    _print_metadata_table(
+        {
+            "files": 1,
+            "filesPending": 0,
+            "filesWithErrors": 0,
+            "metadata": [{"identifier": "/a", "copies": {}}],
+            "nextCursor": "TOKEN123",
+        }
+    )
+    assert "next cursor: TOKEN123" in capsys.readouterr().out
+
+
+def test_query_metadata_cursor_desc_map_to_query(config_fx, cli_fx):
+    """--cursor and --desc map to the query cursor and order_dir."""
+    cli_fx("retrieve_metadata", return_value={"metadata": []})
+    _run_query_metadata(
+        config_fx(),
+        _metadata_args(order="ingested", desc=True, cursor="TOK"),
+    )
+    query = cli_fx.calls["retrieve_metadata"][0][1]["query"]
+    assert query["order_dir"] == "desc"
+    assert query["cursor"] == "TOK"
+
+
+def test_query_metadata_count_prints_total(config_fx, cli_fx, capsys):
+    """--count sends count=True and prints only the total."""
+    cli_fx("retrieve_metadata", return_value={"total": 4242})
+    _run_query_metadata(config_fx(), _metadata_args(count=True))
+    assert cli_fx.calls["retrieve_metadata"][0][1]["query"]["count"] is True
+    assert capsys.readouterr().out.strip() == "4242"
+
+
+def test_query_metadata_count_with_file_id_errors(config_fx, cli_fx):
+    """--count with a FILE_ID exits 2: a single-file lookup has no total."""
+    cli_fx("retrieve_file_metadata", return_value={"identifier": "/x"})
+    with pytest.raises(SystemExit) as exc:
+        _run_query_metadata(
+            config_fx(), _metadata_args(file_id="/x", count=True)
+        )
+    assert exc.value.code == 2
+    assert cli_fx.calls["retrieve_file_metadata"] == []
+
+
+def test_query_metadata_count_null_total_prints_zero(
+    config_fx, cli_fx, capsys
+):
+    """A null total prints 0, not the literal None."""
+    cli_fx("retrieve_metadata", return_value={"total": None})
+    _run_query_metadata(config_fx(), _metadata_args(count=True))
+    assert capsys.readouterr().out.strip() == "0"
 
 
 def test_update_metadata(config_fx, cli_fx, capsys):

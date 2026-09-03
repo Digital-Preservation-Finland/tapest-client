@@ -159,10 +159,13 @@ tapest-client query-metadata [FILE_ID] [options]
 | `--parent`     | List one directory level under PATH              |
 | `--identifier` | File identifier (repeatable)                     |
 | `--storage`    | Storage name                                     |
-| `--limit`      | Limit number of results                          |
+| `--limit`      | Page size (a page holds at most 1000 files)      |
+| `--cursor`     | Resume from a previous page's nextCursor         |
 | `--pending`    | Pending files only                               |
 | `--errors`     | Files with errors only                           |
 | `--order`      | Order by field                                   |
+| `--desc`       | Sort descending (use with `--order`)             |
+| `--count`      | Print only the total number of matching files    |
 
 `--regex` matches file identifiers against a regular expression (MongoDB
 `$regex` / PCRE-ish syntax), complementary to `--prefix`. Patterns are applied
@@ -177,6 +180,13 @@ reported separately as `commonPrefixes` - each ending in `/`, ready to feed back
 as the next `--parent` for interactive browsing. An empty path or `/` lists the
 root, and a trailing slash is optional.
 
+A response holds at most 1000 files. `--limit` sets the page size (a larger
+value is capped at 1000). When more files match, the response carries a
+`nextCursor` token; pass it back with `--cursor` to read the next page. Sorting
+is by `--order` (default `identifier`, or `ingested`), ascending unless `--desc`.
+Only `identifier` and `ingested` can be paged. `--count` prints just the total
+number of matching files, ignoring the page options.
+
 Examples:
 
 ```
@@ -185,6 +195,9 @@ tapest-client query-metadata --pending
 tapest-client query-metadata --prefix /prefix --limit 100
 tapest-client query-metadata --regex '/2022/.*\.dat$'
 tapest-client query-metadata --parent /200182/2022/
+tapest-client query-metadata --prefix /200182/ --count
+tapest-client query-metadata --prefix /200182/ --order ingested --desc --limit 1000
+tapest-client query-metadata --prefix /200182/ --limit 1000 --cursor <nextCursor>
 ```
 
 ### Update metadata
