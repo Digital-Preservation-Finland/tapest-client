@@ -43,7 +43,6 @@ def _metadata_args(**overrides):
         desc=False,
         limit=None,
         cursor=None,
-        count=False,
         format="json",
     )
     defaults.update(overrides)
@@ -509,34 +508,6 @@ def test_query_metadata_cursor_desc_map_to_query(config_fx, cli_fx):
     query = cli_fx.calls["retrieve_metadata"][0][1]["query"]
     assert query["order_dir"] == "desc"
     assert query["cursor"] == "TOK"
-
-
-def test_query_metadata_count_prints_total(config_fx, cli_fx, capsys):
-    """--count sends count=True and prints only the total."""
-    cli_fx("retrieve_metadata", return_value={"total": 4242})
-    _run_query_metadata(config_fx(), _metadata_args(count=True))
-    assert cli_fx.calls["retrieve_metadata"][0][1]["query"]["count"] is True
-    assert capsys.readouterr().out.strip() == "4242"
-
-
-def test_query_metadata_count_with_file_id_errors(config_fx, cli_fx):
-    """--count with a FILE_ID exits 2: a single-file lookup has no total."""
-    cli_fx("retrieve_file_metadata", return_value={"identifier": "/x"})
-    with pytest.raises(SystemExit) as exc:
-        _run_query_metadata(
-            config_fx(), _metadata_args(file_id="/x", count=True)
-        )
-    assert exc.value.code == 2
-    assert cli_fx.calls["retrieve_file_metadata"] == []
-
-
-def test_query_metadata_count_null_total_prints_zero(
-    config_fx, cli_fx, capsys
-):
-    """A null total prints 0, not the literal None."""
-    cli_fx("retrieve_metadata", return_value={"total": None})
-    _run_query_metadata(config_fx(), _metadata_args(count=True))
-    assert capsys.readouterr().out.strip() == "0"
 
 
 def test_update_metadata(config_fx, cli_fx, capsys):

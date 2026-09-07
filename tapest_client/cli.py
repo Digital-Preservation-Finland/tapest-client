@@ -242,11 +242,6 @@ def build_parser() -> argparse.ArgumentParser:
         help="resume a listing from the nextCursor of a previous page",
     )
     sub.add_argument(
-        "--count",
-        action="store_true",
-        help="print only the total number of matching files",
-    )
-    sub.add_argument(
         "--format",
         choices=["json", "table"],
         default="json",
@@ -653,8 +648,6 @@ def _build_query(args: argparse.Namespace) -> dict:
         query["limit"] = args.limit
     if getattr(args, "cursor", None) is not None:
         query["cursor"] = args.cursor
-    if getattr(args, "count", False):
-        query["count"] = True
     return query
 
 
@@ -666,10 +659,6 @@ def _run_query_metadata(config: Config, args: argparse.Namespace) -> None:
             "aggregate view cannot order by it)",
             args.order,
         )
-        sys.exit(2)
-    if getattr(args, "count", False) and args.file_id:
-        # A single-file lookup returns no total; count needs a filter query.
-        logger.error("--count cannot be combined with a FILE_ID")
         sys.exit(2)
     if args.file_id:
         logger.info(
@@ -688,10 +677,6 @@ def _run_query_metadata(config: Config, args: argparse.Namespace) -> None:
         result = tapest_client.retrieve_metadata(
             config, query=query, storage_name=args.storage
         )
-    if getattr(args, "count", False):
-        # Count mode: print only the total, whatever the format.
-        print(result.get("total") or 0)
-        return
     if getattr(args, "format", "json") == "table":
         _print_metadata_table(result)
     else:
