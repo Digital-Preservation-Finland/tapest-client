@@ -237,9 +237,9 @@ def build_parser() -> argparse.ArgumentParser:
         help="page size (server caps a page at 1000 files)",
     )
     sub.add_argument(
-        "--cursor",
+        "--page-token",
         default=None,
-        help="resume a listing from the nextCursor of a previous page",
+        help="resume a listing from the nextPageToken of a previous page",
     )
     sub.add_argument(
         "--format",
@@ -390,15 +390,15 @@ def _print_metadata_copies(copies: dict) -> None:
 
 def _print_metadata_footer(result: dict, items: list) -> None:
     """Print the trailing files/pending/errors summary line, if present, plus
-    the next-page cursor when there is one."""
+    the next-page token when there is one."""
     if "files" in result:
         footer = (
             f"\n{result.get('files', len(items))} files, "
             f"{result.get('filesPending', 0)} pending, "
             f"{result.get('filesWithErrors', 0)} with errors"
         )
-        if result.get("nextCursor"):
-            footer += f"\nnext cursor: {result['nextCursor']}"
+        if result.get("nextPageToken"):
+            footer += f"\nnext page token: {result['nextPageToken']}"
         print(footer)
 
 
@@ -646,8 +646,8 @@ def _build_query(args: argparse.Namespace) -> dict:
         query["order_dir"] = "desc"
     if getattr(args, "limit", None) is not None:
         query["limit"] = args.limit
-    if getattr(args, "cursor", None) is not None:
-        query["cursor"] = args.cursor
+    if getattr(args, "page_token", None) is not None:
+        query["page_token"] = args.page_token
     return query
 
 

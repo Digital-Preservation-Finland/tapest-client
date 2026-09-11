@@ -160,7 +160,7 @@ tapest-client query-metadata [FILE_ID] [options]
 | `--identifier` | File identifier (repeatable)                     |
 | `--storage`    | Storage name                                     |
 | `--limit`      | Page size (a page holds at most 1000 files)      |
-| `--cursor`     | Resume from a previous page's nextCursor         |
+| `--page-token` | Resume from a previous page's nextPageToken      |
 | `--pending`    | Pending files only                               |
 | `--errors`     | Files with errors only                           |
 | `--order`      | Order by field                                   |
@@ -181,7 +181,7 @@ root, and a trailing slash is optional.
 
 A response holds at most 1000 files. `--limit` sets the page size (a larger
 value is capped at 1000). When more files match, the response carries a
-`nextCursor` token; pass it back with `--cursor` to read the next page. Sorting
+`nextPageToken` token; pass it back with `--page-token` to read the next page. Sorting
 is by `--order` (default `identifier`, or `ingested`), ascending unless `--desc`.
 Only `identifier` and `ingested` can be paged.
 
@@ -194,7 +194,7 @@ tapest-client query-metadata --prefix /prefix --limit 100
 tapest-client query-metadata --regex '/2022/.*\.dat$'
 tapest-client query-metadata --parent /200182/2022/
 tapest-client query-metadata --prefix /200182/ --order ingested --desc --limit 1000
-tapest-client query-metadata --prefix /200182/ --limit 1000 --cursor <nextCursor>
+tapest-client query-metadata --prefix /200182/ --limit 1000 --page-token <nextPageToken>
 ```
 
 ### Update metadata

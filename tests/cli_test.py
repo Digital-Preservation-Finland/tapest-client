@@ -42,7 +42,7 @@ def _metadata_args(**overrides):
         order=None,
         desc=False,
         limit=None,
-        cursor=None,
+        page_token=None,
         format="json",
     )
     defaults.update(overrides)
@@ -484,30 +484,30 @@ def test_print_metadata_table_no_data_falls_back_to_json(capsys):
     assert json.loads(capsys.readouterr().out)["metadata"] is None
 
 
-def test_print_metadata_table_shows_next_cursor(capsys):
-    """A page with a nextCursor prints it in the footer."""
+def test_print_metadata_table_shows_next_page_token(capsys):
+    """A page with a nextPageToken prints it in the footer."""
     _print_metadata_table(
         {
             "files": 1,
             "filesPending": 0,
             "filesWithErrors": 0,
             "metadata": [{"identifier": "/a", "copies": {}}],
-            "nextCursor": "TOKEN123",
+            "nextPageToken": "TOKEN123",
         }
     )
-    assert "next cursor: TOKEN123" in capsys.readouterr().out
+    assert "next page token: TOKEN123" in capsys.readouterr().out
 
 
-def test_query_metadata_cursor_desc_map_to_query(config_fx, cli_fx):
-    """--cursor and --desc map to the query cursor and order_dir."""
+def test_query_metadata_page_token_desc_map_to_query(config_fx, cli_fx):
+    """--page-token and --desc map to the query page_token and order_dir."""
     cli_fx("retrieve_metadata", return_value={"metadata": []})
     _run_query_metadata(
         config_fx(),
-        _metadata_args(order="ingested", desc=True, cursor="TOK"),
+        _metadata_args(order="ingested", desc=True, page_token="TOK"),
     )
     query = cli_fx.calls["retrieve_metadata"][0][1]["query"]
     assert query["order_dir"] == "desc"
-    assert query["cursor"] == "TOK"
+    assert query["page_token"] == "TOK"
 
 
 def test_update_metadata(config_fx, cli_fx, capsys):
