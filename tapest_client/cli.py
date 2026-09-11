@@ -47,6 +47,7 @@ import logging
 import os
 from pathlib import Path
 import sys
+import time
 
 import requests
 import tapest_client
@@ -152,12 +153,6 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="file identifier prefix (repeatable); with a prefix the only "
         "positional argument is the destination directory",
-    )
-    sub.add_argument(
-        "--next",
-        dest="next_file_id",
-        default=None,
-        help="identifier of the file to read next, for tape ordering",
     )
     sub.add_argument(
         "--skip",
@@ -471,13 +466,6 @@ def _extract_targets(args: argparse.Namespace) -> tuple[list[str], str]:
     return args.args[:-1], args.args[-1]
 
 
-def _next_identifier(metadata_list: list[dict], index: int) -> str | None:
-    """Identifier of the file after ``index``, to warm the next recache."""
-    if index + 1 < len(metadata_list):
-        return metadata_list[index + 1]["identifier"]
-    return None
-
-
 def _extract_to_file(
     config: Config, identifier: str, dest: str, args: argparse.Namespace
 ) -> None:
@@ -491,7 +479,6 @@ def _extract_to_file(
         config,
         tapest_client.retrieve_file_metadata(config, identifier),
         Path(dest),
-        args.next_file_id,
         args.skip,
         args.force,
     )
@@ -512,7 +499,12 @@ def _extract_to_directory(
     dest: str,
     args: argparse.Namespace,
 ) -> None:
-    """Extract every file that matches the query into a directory."""
+    """Extract every file that matches the query into a directory.
+
+    Request each file once to mark the whole set required, take the files
+    that are ready, then come back for the rest until they arrive or the
+    attempts run out. A file that never arrives does not stop the others.
+    """
     args.identifier = [
         normalize_identifier(i) for i in identifiers
     ] or None
@@ -530,22 +522,18 @@ def _extract_to_directory(
         raise TapestClientError(f"Directory does not exist: {dest}")
 
     logger.info("Extracting %d file(s) to '%s' ...", len(metadata_list), dest)
-    extracted_count = 0
+
+    pending = []
     skipped_count = 0
-    for i, file_metadata in enumerate(metadata_list):
-        extracted = _extract_one(
-            config,
-            file_metadata,
-            root / file_metadata["identifier"].lstrip("/"),
-            _next_identifier(metadata_list, i),
-            args.skip,
-            args.force,
-        )
-        if extracted is None:
+    for file_metadata in metadata_list:
+        path = root / file_metadata["identifier"].lstrip("/")
+        if _should_extract(file_metadata, path, args.skip, args.force):
+            pending.append((file_metadata, path))
+        else:
             skipped_count += 1
-            continue
-        _print_jsonl(extracted)
-        extracted_count += 1
+
+    extracted_count, unavailable = _collect_files(config, pending)
+
     if skipped_count:
         logger.warning(
             "Skipped %d file(s) that are already in '%s'", skipped_count, dest
@@ -553,6 +541,50 @@ def _extract_to_directory(
     logger.info(
         "Successfully extracted %d file(s) to '%s'", extracted_count, dest
     )
+    if unavailable:
+        max_attempts = max(1, config.max_retry_attempts)
+        raise TapestClientError(
+            f"{len(unavailable)} file(s) unavailable after "
+            f"{max_attempts} attempts: {', '.join(unavailable)}",
+            exit_code=117,
+        )
+
+
+def _collect_files(
+    config: Config, pending: list[tuple[dict, Path]]
+) -> tuple[int, list[str]]:
+    """Take the ready files across attempts and mark the rest required.
+
+    The first attempt requests every file, which marks the not-ready ones
+    required so the service batches them in one recache. Later attempts come
+    back for the files that were not ready. Return the count extracted and the
+    identifiers that never arrived.
+    """
+    max_attempts = max(1, config.max_retry_attempts)
+    default_duration = max(1, config.default_sleep_duration)
+    extracted_count = 0
+    sleep_seconds = 0
+
+    for attempt in range(max_attempts):
+        if not pending:
+            break
+        if attempt:
+            time.sleep(sleep_seconds or default_duration)
+        still_pending = []
+        sleep_seconds = 0
+        for file_metadata, path in pending:
+            ready, retry_after = tapest_client.attempt_extract(
+                config, file_metadata, str(path)
+            )
+            if ready:
+                _print_jsonl(file_metadata)
+                extracted_count += 1
+            else:
+                still_pending.append((file_metadata, path))
+                sleep_seconds = max(sleep_seconds, retry_after)
+        pending = still_pending
+
+    return extracted_count, [fm["identifier"] for fm, _ in pending]
 
 
 def _run_extract(config: Config, args: argparse.Namespace) -> None:
@@ -572,37 +604,48 @@ def _run_extract(config: Config, args: argparse.Namespace) -> None:
     _extract_to_directory(config, identifiers, dest, args)
 
 
+def _should_extract(
+    file_metadata: dict, path: Path, skip: bool, force: bool
+) -> bool:
+    """Decide whether a file must be fetched under --skip and --force.
+
+    Returns False to leave an identical local file as it is.
+
+    :raises FileAlreadyExistsError: If the path is taken and neither
+        option allows it to be reused or replaced.
+    """
+    if not path.exists():
+        return True
+    if not (skip or force):
+        raise FileAlreadyExistsError(f"File already exists at {path}")
+    if tapest_client.is_same_file(
+        str(path), file_metadata["size"], file_metadata["checksum"]
+    ):
+        logger.info(
+            "Skipping file at local pathname '%s': already extracted", path
+        )
+        return False
+    if not force:
+        raise FileAlreadyExistsError(f"File already exists at {path}")
+    path.unlink()
+    return True
+
+
 def _extract_one(
     config: Config,
     file_metadata: dict,
     path: Path,
-    next_identifier: str | None,
     skip: bool,
     force: bool,
 ) -> dict | None:
     """Extract one file to ``path`` under --skip and --force.
 
     Returns None for a file that is left on disk as it is.
-
-    :raises FileAlreadyExistsError: If the path is taken and neither
-        option allows it to be reused or replaced.
     """
-    if path.exists():
-        if not (skip or force):
-            raise FileAlreadyExistsError(f"File already exists at {path}")
-        if tapest_client.is_same_file(
-            str(path), file_metadata["size"], file_metadata["checksum"]
-        ):
-            logger.info(
-                "Skipping file at local pathname '%s': already extracted",
-                path,
-            )
-            return None
-        if not force:
-            raise FileAlreadyExistsError(f"File already exists at {path}")
-        path.unlink()
+    if not _should_extract(file_metadata, path, skip, force):
+        return None
     return tapest_client.extract_file_with_metadata(
-        config, file_metadata, str(path), next_identifier
+        config, file_metadata, str(path)
     )
 
 

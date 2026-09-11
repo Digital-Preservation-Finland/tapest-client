@@ -621,7 +621,6 @@ def extract_file(
     config: Config,
     identifier: str,
     local_file_pathname: str,
-    next_identifier: str | None = None,
     account_name: str | None = None,
 ) -> dict:
     """Extract a file by identifier to a local path.
@@ -635,8 +634,93 @@ def extract_file(
         config,
         file_metadata,
         local_file_pathname,
-        next_identifier,
         account_name=account_name,
+    )
+
+
+def _write_extracted_file(
+    config: Config,
+    response: requests.Response,
+    file_metadata: dict,
+    local_file_pathname: str,
+) -> None:
+    """Write the response body to disk and verify size and checksum.
+
+    Clean up and raise if the file does not match its metadata.
+    """
+    identifier = file_metadata["identifier"]
+    path = Path(local_file_pathname)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "wb") as f:
+        for chunk in response.iter_content(chunk_size=8192):
+            f.write(chunk)
+
+    actual_size = path.stat().st_size
+    if actual_size != file_metadata["size"]:
+        cleanup_file(config, local_file_pathname)
+        raise TapestClientError(
+            f"Failed to extract file {identifier}: "
+            f"size {actual_size} != expected {file_metadata['size']}"
+        )
+
+    actual_checksum = generate_checksum(path)
+    if actual_checksum != file_metadata["checksum"]:
+        cleanup_file(config, local_file_pathname)
+        raise TapestClientError(
+            f"Failed to extract file {identifier}: checksum mismatch"
+        )
+
+    created_ts = (
+        datetime.strptime(file_metadata["created"], TIMESTAMP_FORMAT)
+        .replace(tzinfo=timezone.utc)
+        .timestamp()
+    )
+    modified_ts = (
+        datetime.strptime(file_metadata["modified"], TIMESTAMP_FORMAT)
+        .replace(tzinfo=timezone.utc)
+        .timestamp()
+    )
+    os.utime(path, (created_ts, modified_ts))
+
+
+def attempt_extract(
+    config: Config,
+    file_metadata: dict,
+    local_file_pathname: str,
+    account_name: str | None = None,
+) -> tuple[bool, int]:
+    """Make one extract request.
+
+    Return ``(True, 0)`` and write the file when the service gives the bytes
+    (200). Return ``(False, retry_after)`` when the file is still on tape
+    (202); ``retry_after`` is the server's Retry-After in seconds, or 0 when
+    it gives none. Clean up and raise for any other status.
+
+    A 202 makes the service mark the file required. A caller can request every
+    file once to mark a whole set, then come back for the bytes.
+
+    See :func:`ingest_file` for the semantics of ``account_name``.
+    """
+    identifier = file_metadata["identifier"]
+    url = _file_url(config, identifier)
+    headers = _build_headers(config, account_name=account_name)
+    verify_ssl = _verify_param(config)
+
+    response = requests.get(
+        url, headers=headers, stream=True, verify=verify_ssl
+    )
+    if response.status_code == 200:
+        _write_extracted_file(
+            config, response, file_metadata, local_file_pathname
+        )
+        return True, 0
+    if response.status_code == 202:
+        return False, int(response.headers.get("Retry-After", 0))
+
+    cleanup_file(config, local_file_pathname)
+    raise TapestClientError(
+        f"Failed to extract file {identifier}: "
+        f"{response.status_code} {response.text}"
     )
 
 
@@ -644,13 +728,12 @@ def extract_file_with_metadata(
     config: Config,
     file_metadata: dict,
     local_file_pathname: str,
-    next_identifier: str | None = None,
     account_name: str | None = None,
 ) -> dict:
     """Extract a file using provided metadata to a local path.
 
-    Uses its own retry loop because the response body must be written to
-    disk and verified after each attempt.
+    Retries a file that is still on tape (202) up to
+    ``config.max_retry_attempts`` times and sleeps between attempts.
 
     See :func:`ingest_file` for the semantics of ``account_name``.
     """
@@ -661,69 +744,17 @@ def extract_file_with_metadata(
         )
 
     identifier = file_metadata["identifier"]
-    url = _file_url(config, identifier)
-    headers = _build_headers(config, account_name=account_name)
-    if next_identifier:
-        headers["X-TAPEST-Next-File"] = urllib.parse.quote(
-            normalize_identifier(next_identifier), safe=""
-        )
-
-    verify_ssl = _verify_param(config)
     max_attempts = max(1, config.max_retry_attempts)
     default_duration = max(1, config.default_sleep_duration)
 
     for _ in range(max_attempts):
-        response = requests.get(
-            url, headers=headers, stream=True, verify=verify_ssl
+        ready, retry_after = attempt_extract(
+            config, file_metadata, local_file_pathname,
+            account_name=account_name,
         )
-
-        if response.status_code == 200:
-            path.parent.mkdir(parents=True, exist_ok=True)
-            with open(path, "wb") as f:
-                for chunk in response.iter_content(chunk_size=8192):
-                    f.write(chunk)
-
-            actual_size = path.stat().st_size
-            if actual_size != file_metadata["size"]:
-                cleanup_file(config, local_file_pathname)
-                raise TapestClientError(
-                    f"Failed to extract file {identifier}: "
-                    f"size {actual_size} != expected {file_metadata['size']}"
-                )
-
-            actual_checksum = generate_checksum(path)
-            if actual_checksum != file_metadata["checksum"]:
-                cleanup_file(config, local_file_pathname)
-                raise TapestClientError(
-                    f"Failed to extract file {identifier}: checksum mismatch"
-                )
-
-            created_ts = (
-                datetime.strptime(file_metadata["created"], TIMESTAMP_FORMAT)
-                .replace(tzinfo=timezone.utc)
-                .timestamp()
-            )
-            modified_ts = (
-                datetime.strptime(file_metadata["modified"], TIMESTAMP_FORMAT)
-                .replace(tzinfo=timezone.utc)
-                .timestamp()
-            )
-            os.utime(path, (created_ts, modified_ts))
-
+        if ready:
             return file_metadata
-
-        if response.status_code == 202:
-            seconds = int(
-                response.headers.get("Retry-After", default_duration)
-            )
-            time.sleep(seconds)
-            continue
-
-        cleanup_file(config, local_file_pathname)
-        raise TapestClientError(
-            f"Failed to extract file {identifier}: "
-            f"{response.status_code} {response.text}"
-        )
+        time.sleep(retry_after or default_duration)
 
     cleanup_file(config, local_file_pathname)
     raise TapestClientError(

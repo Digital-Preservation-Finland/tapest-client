@@ -21,6 +21,7 @@ from tapest_client.client import (
     recache_file,
     extract_file,
     extract_file_with_metadata,
+    attempt_extract,
     delete_file,
     retrieve_file_metadata,
     update_file_metadata,
@@ -272,14 +273,31 @@ def test_extract_with_metadata_http_error_cleans_up(tmp_path, config_fx, request
         )
 
 
-def test_extract_with_metadata_next_identifier(tmp_path, config_fx, requests_fx):
-    """next_identifier is sent as X-TAPEST-Next-File header for prefetch."""
+def test_attempt_extract_ready(tmp_path, config_fx, requests_fx):
+    """A 200 writes the file and reports it ready."""
     dest = tmp_path / "out.dat"
     requests_fx.responses["get"] = _download_response()
-    extract_file_with_metadata(
-        config_fx(), SAMPLE_METADATA, str(dest), next_identifier="/next"
+    ready, retry_after = attempt_extract(
+        config_fx(), SAMPLE_METADATA, str(dest)
     )
-    assert "X-TAPEST-Next-File" in requests_fx.calls["get"]["headers"]
+    assert ready is True
+    assert retry_after == 0
+    assert dest.read_bytes() == b"hello world"
+
+
+def test_attempt_extract_not_ready(tmp_path, config_fx, requests_fx):
+    """A 202 reports not ready with the server's Retry-After and writes
+    nothing, so a caller can mark the file and come back for it."""
+    dest = tmp_path / "out.dat"
+    requests_fx.responses["get"] = mock_response(
+        202, headers={"Retry-After": "7"}
+    )
+    ready, retry_after = attempt_extract(
+        config_fx(), SAMPLE_METADATA, str(dest)
+    )
+    assert ready is False
+    assert retry_after == 7
+    assert not dest.exists()
 
 
 def test_extract_with_metadata_creates_parent_dirs(tmp_path, config_fx, requests_fx):

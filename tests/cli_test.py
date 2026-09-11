@@ -188,15 +188,6 @@ def test_ingest_has_no_force_option():
         build_parser().parse_args(["ingest", "--force", "/path/a.dat"])
 
 
-def test_extract_with_next_id():
-    """extract accepts the next file identifier for tape ordering."""
-    args = build_parser().parse_args(
-        ["extract", "--next", "/next-id", "/id", "/path"]
-    )
-    assert args.next_file_id == "/next-id"
-    assert args.args == ["/id", "/path"]
-
-
 # -- Handlers -----------------------------------------------------------------
 
 
@@ -271,12 +262,12 @@ def test_extract_one_identifier_to_a_file(tmp_path, config_fx, cli_fx):
     cli_fx("retrieve_file_metadata", return_value=metadata)
     cli_fx("extract_file_with_metadata", return_value=metadata)
     args = SimpleNamespace(
-        args=["/id", str(dest)], prefix=None, next_file_id=None,
+        args=["/id", str(dest)], prefix=None,
         skip=False, force=False,
     )
     _run_extract(config_fx(), args)
     assert cli_fx.calls["extract_file_with_metadata"] == [
-        ((metadata, str(dest), None), {})
+        ((metadata, str(dest)), {})
     ]
 
 
@@ -294,7 +285,7 @@ def test_extract_one_identifier_skips_a_matching_file(
     cli_fx("retrieve_file_metadata", return_value=metadata)
     cli_fx("extract_file_with_metadata")
     args = SimpleNamespace(
-        args=["/id", str(dest)], prefix=None, next_file_id=None,
+        args=["/id", str(dest)], prefix=None,
         skip=True, force=False,
     )
     _run_extract(config_fx(), args)
@@ -306,7 +297,7 @@ def test_extract_needs_a_destination(config_fx, cli_fx):
     """One positional argument and no prefix is an error."""
     cli_fx("extract_file")
     args = SimpleNamespace(
-        args=["/id"], prefix=None, next_file_id=None,
+        args=["/id"], prefix=None,
         skip=False, force=False,
     )
     with pytest.raises(TapestClientError):
@@ -623,20 +614,38 @@ def test_ingest_prefix_normalization(
 
 
 def test_extract_files(tmp_path, config_fx, cli_fx, capsys):
-    """extract queries metadata then extracts each matching file.
-
-    Every file but the last carries the next identifier, which lets the
-    service stage the following file while this one is written.
-    """
+    """extract queries metadata then requests each matching file once, which
+    marks the whole set required in one sweep."""
     metadata = [{"identifier": "/a"}, {"identifier": "/b"}]
     cli_fx("retrieve_metadata", return_value={"metadata": metadata})
-    cli_fx("extract_file_with_metadata", return_value={"identifier": "/a"})
+    cli_fx("attempt_extract", return_value=(True, 0))
     _run_extract(config_fx(), _extract_args(tmp_path))
-    assert cli_fx.calls["extract_file_with_metadata"] == [
-        ((metadata[0], str(tmp_path / "a"), "/b"), {}),
-        ((metadata[1], str(tmp_path / "b"), None), {}),
+    assert cli_fx.calls["attempt_extract"] == [
+        ((metadata[0], str(tmp_path / "a")), {}),
+        ((metadata[1], str(tmp_path / "b")), {}),
     ]
     assert len(_jsonl(capsys)) == 2
+
+
+def test_extract_files_reports_unavailable(
+    tmp_path, config_fx, cli_fx, monkeypatch, capsys
+):
+    """A file that never becomes ready is reported and raises 117, while the
+    ready files are still extracted."""
+    metadata = [{"identifier": "/a"}, {"identifier": "/b"}]
+    cli_fx("retrieve_metadata", return_value={"metadata": metadata})
+
+    def _attempt(config, file_metadata, path):
+        return file_metadata["identifier"] == "/a", 0
+
+    monkeypatch.setattr(
+        "tapest_client.cli.tapest_client.attempt_extract", _attempt
+    )
+    with pytest.raises(TapestClientError) as exc_info:
+        _run_extract(config_fx(), _extract_args(tmp_path))
+    assert exc_info.value.exit_code == 117
+    assert "/b" in str(exc_info.value)
+    assert [record["identifier"] for record in _jsonl(capsys)] == ["/a"]
 
 
 def _extract_args(dest, **overrides):
@@ -644,7 +653,6 @@ def _extract_args(dest, **overrides):
     defaults = dict(
         args=[str(dest)],
         prefix=["pfx"],
-        next_file_id=None,
         skip=False,
         force=False,
     )
@@ -657,7 +665,6 @@ def test_extract_files_requires_source(config_fx):
     args = SimpleNamespace(
         args=["/dir"],
         prefix=None,
-        next_file_id=None,
         skip=False,
         force=False,
     )
@@ -852,9 +859,9 @@ def test_extract_skip_leaves_a_matching_file(
         "checksum": generate_checksum(local),
     }
     cli_fx("retrieve_metadata", return_value={"metadata": [metadata]})
-    cli_fx("extract_file_with_metadata")
+    cli_fx("attempt_extract")
     _run_extract(config_fx(), _extract_args(tmp_path, skip=True))
-    assert cli_fx.calls["extract_file_with_metadata"] == []
+    assert cli_fx.calls["attempt_extract"] == []
     assert _jsonl(capsys) == []
 
 
@@ -870,11 +877,11 @@ def test_extract_force_replaces_a_different_file(
         "checksum": "sha256:other",
     }
     cli_fx("retrieve_metadata", return_value={"metadata": [metadata]})
-    cli_fx("extract_file_with_metadata", return_value=metadata)
+    cli_fx("attempt_extract", return_value=(True, 0))
     _run_extract(config_fx(), _extract_args(tmp_path, force=True))
     assert not local.exists()
-    assert cli_fx.calls["extract_file_with_metadata"] == [
-        ((metadata, str(local), None), {})
+    assert cli_fx.calls["attempt_extract"] == [
+        ((metadata, str(local)), {})
     ]
 
 
@@ -886,17 +893,17 @@ def test_extract_existing_file_raises_without_options(
     local.write_bytes(b"stale")
     metadata = {"identifier": "/a.dat", "size": 11, "checksum": "sha256:x"}
     cli_fx("retrieve_metadata", return_value={"metadata": [metadata]})
-    cli_fx("extract_file_with_metadata")
+    cli_fx("attempt_extract")
     with pytest.raises(FileAlreadyExistsError, match="already exists"):
         _run_extract(config_fx(), _extract_args(tmp_path))
-    assert cli_fx.calls["extract_file_with_metadata"] == []
+    assert cli_fx.calls["attempt_extract"] == []
 
 
 def test_extract_missing_destination_directory(tmp_path, config_fx, cli_fx):
     """The destination directory has to exist before any file is written."""
     metadata = {"identifier": "/a.dat", "size": 11, "checksum": "sha256:x"}
     cli_fx("retrieve_metadata", return_value={"metadata": [metadata]})
-    cli_fx("extract_file_with_metadata")
+    cli_fx("attempt_extract")
     with pytest.raises(TapestClientError, match="does not exist"):
         _run_extract(config_fx(), _extract_args(tmp_path / "nope"))
-    assert cli_fx.calls["extract_file_with_metadata"] == []
+    assert cli_fx.calls["attempt_extract"] == []
