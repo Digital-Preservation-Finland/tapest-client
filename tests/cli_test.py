@@ -10,7 +10,6 @@ from tapest_client.cli import (
     build_parser,
     main,
     METADATA_ORDER_CHOICES,
-    COPY_ORDER_FIELDS,
     _load_config,
     _print_metadata_table,
     _run_status,
@@ -402,39 +401,19 @@ def test_metadata_query_builds_parent_body(config_fx, cli_fx, capsys):
 
 
 def test_metadata_order_choices_synced():
-    """Order choices match the server's accepted set: 'queued' present,
-    obsolete 'required' gone."""
-    assert "queued" in METADATA_ORDER_CHOICES
-    assert "required" not in METADATA_ORDER_CHOICES
-    assert "storage" not in METADATA_ORDER_CHOICES
-    assert set(METADATA_ORDER_CHOICES) == {
-        "identifier", "ingested", "stored",
-        "checked", "recached", "extracted", "queued",
-    }
+    """Order choices match the server's OrderByValue: only the two pageable
+    root fields, no per-copy or obsolete fields."""
+    assert set(METADATA_ORDER_CHOICES) == {"identifier", "ingested"}
 
 
-def test_query_metadata_copy_order_requires_storage(config_fx, cli_fx):
-    """Ordering by a per-copy field without --storage exits 2 before any
-    request is issued."""
-    cli_fx("retrieve_metadata", return_value={"metadata": []})
-    for field in sorted(COPY_ORDER_FIELDS):
-        with pytest.raises(SystemExit) as exc:
-            _run_query_metadata(config_fx(), _metadata_args(order=field))
-        assert exc.value.code == 2
-    assert cli_fx.calls["retrieve_metadata"] == []
+def test_query_metadata_order_rejects_non_pageable_field():
+    """A dropped per-copy field is not a valid --order choice."""
+    with pytest.raises(SystemExit):
+        build_parser().parse_args(["query-metadata", "--order", "stored"])
 
 
-def test_query_metadata_copy_order_with_storage_ok(config_fx, cli_fx):
-    """A per-copy order field passes the guard when --storage is given."""
-    cli_fx("retrieve_metadata", return_value={"metadata": []})
-    _run_query_metadata(
-        config_fx(), _metadata_args(order="stored", storage="kaj_lt9")
-    )
-    assert cli_fx.calls["retrieve_metadata"][0][1]["storage_name"] == "kaj_lt9"
-
-
-def test_query_metadata_ingested_order_no_storage_ok(config_fx, cli_fx):
-    """order=ingested (file-level) is allowed without --storage."""
+def test_query_metadata_ingested_order_ok(config_fx, cli_fx):
+    """order=ingested maps to the query order_by."""
     cli_fx("retrieve_metadata", return_value={"metadata": []})
     _run_query_metadata(config_fx(), _metadata_args(order="ingested"))
     assert cli_fx.calls["retrieve_metadata"][0][1]["query"][

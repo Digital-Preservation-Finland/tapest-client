@@ -61,20 +61,12 @@ logger = logging.getLogger("tapest-client")
 
 DEFAULT_CONFIG = json.dumps(dataclasses.asdict(Config()), indent=2) + "\n"
 
+# Sort fields the API accepts. Both are document-root, index-backed fields,
+# so every listing can be paged. Keep in sync with the API's OrderByValue.
 METADATA_ORDER_CHOICES = [
     "identifier",
     "ingested",
-    "stored",
-    "checked",
-    "recached",
-    "extracted",
-    "queued",
 ]
-
-# Per-copy order fields: meaningful only when scoped to one storage
-# (X-TAPEST-Storage). The aggregate view has no per-copy column to sort on.
-# ``ingested`` is file-level (document root) and orderable without --storage.
-COPY_ORDER_FIELDS = {"stored", "checked", "queued", "extracted"}
 
 
 # -- Parser construction -----------------------------------------------------
@@ -653,13 +645,6 @@ def _build_query(args: argparse.Namespace) -> dict:
 
 def _run_query_metadata(config: Config, args: argparse.Namespace) -> None:
     """Query file metadata for a single file or by filter."""
-    if args.order in COPY_ORDER_FIELDS and not args.storage:
-        logger.error(
-            "--order %s requires --storage NAME (per-copy field; the "
-            "aggregate view cannot order by it)",
-            args.order,
-        )
-        sys.exit(2)
     if args.file_id:
         logger.info(
             "Retrieving metadata for file with identifier '%s' ...",

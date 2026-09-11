@@ -163,7 +163,7 @@ tapest-client query-metadata [FILE_ID] [options]
 | `--page-token` | Resume from a previous page's nextPageToken      |
 | `--pending`    | Pending files only                               |
 | `--errors`     | Files with errors only                           |
-| `--order`      | Order by field                                   |
+| `--order`      | Order by `identifier` (default) or `ingested`    |
 | `--desc`       | Sort descending (use with `--order`)             |
 
 `--regex` matches file identifiers against a regular expression (MongoDB
@@ -181,9 +181,9 @@ root, and a trailing slash is optional.
 
 A response holds at most 1000 files. `--limit` sets the page size (a larger
 value is capped at 1000). When more files match, the response carries a
-`nextPageToken` token; pass it back with `--page-token` to read the next page. Sorting
-is by `--order` (default `identifier`, or `ingested`), ascending unless `--desc`.
-Only `identifier` and `ingested` can be paged.
+`nextPageToken` token; pass it back with `--page-token` to read the next page.
+Sorting is by `--order` (`identifier` default, or `ingested`), ascending unless
+`--desc`.
 
 Examples:
 
