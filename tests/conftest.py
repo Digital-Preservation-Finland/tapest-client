@@ -12,6 +12,8 @@ import requests_mock
 from base64 import b64decode
 from tapest_client.config import Config
 
+PATCH_CONTENT_TYPE = "application/offset+octet-stream"
+
 
 def pytest_addoption(parser):
     """Add custom command line options."""
@@ -205,7 +207,9 @@ def mock_tus_endpoints(config_fx):
     matcher = re.compile(tus_url)
     # Uploads will be tracked within this dictionary.
     uploads = {}
-    tus_supported_extensions = ["creation", "termination"]
+    tus_supported_extensions = [
+        "creation", "creation-with-upload", "termination"
+    ]
     tus_version = "1.0.0"
     tus_supported_version = ["1.0.0"]
     options_headers = {
@@ -264,16 +268,29 @@ def mock_tus_endpoints(config_fx):
 
         filename = b64decode(filename).decode("UTF-8")
         upload_id = f"{request.path_url}/{filename}"
+        upload_length = int(request.headers["Upload-Length"])
+        # The server takes a body only with the offset content type, and
+        # rejects one longer than Upload-Length.
+        body_len = 0
+        if request.headers.get("Content-Type") == PATCH_CONTENT_TYPE:
+            body_len = int(request.headers.get("Content-Length") or 0)
+            if body_len > upload_length:
+                context.status_code = 400
+                context.headers = {"Tus-Resumable": tus_version}
+                return ""
         uploads[upload_id] = {
-            "chunks_uploaded": 0,
+            "chunks_uploaded": body_len,
             "upload_metadata": request.headers["Upload-Metadata"],
-            "upload_length": int(request.headers["Upload-Length"]),
+            "upload_length": upload_length,
         }
 
         context.headers = {
             "Location": upload_id,
             "Tus-Resumable": tus_version,
         }
+        # The real server reports the stored offset whenever it took a body.
+        if request.headers.get("Content-Type") == PATCH_CONTENT_TYPE:
+            context.headers["Upload-Offset"] = str(body_len)
         return ""
 
     def metadata_response(request, context):

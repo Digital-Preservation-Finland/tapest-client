@@ -45,6 +45,7 @@
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 import os
@@ -264,6 +265,24 @@ def parse_chunk_size(chunk_size: str) -> int:
     return int(chunk_size_in_bytes)
 
 
+def _encode_tus_metadata(metadata: dict[str, str]) -> str:
+    """Encode an Upload-Metadata header per the TUS spec.
+
+    Each pair is ``key <base64(value)>``, joined by commas.
+    """
+    return ",".join(
+        f"{key} {base64.b64encode(value.encode('utf-8')).decode('ascii')}"
+        for key, value in metadata.items()
+    )
+
+
+def _creation_with_upload_max(config: Config) -> int:
+    """Largest file sent as one creation-with-upload POST, default 1 GiB."""
+    return parse_chunk_size(
+        getattr(config, "tus_creation_with_upload_max_size", "1 GiB")
+    )
+
+
 def _tus_storage_path(identifier: str) -> Path:
     """Return the resume-state file for one upload.
 
@@ -334,13 +353,8 @@ def _tus_upload(
         chunk_size=chunk_size or config.tus_chunk_size
     )
     tus_client_obj = tus_client.TusClient(url=f"{config.host}/tus")
-    headers = _build_headers(
-        config=config,
-        extra={
-            "X-TAPEST-Size": str(size),
-        },
-        account_name=account_name,
-    )
+    # The size travels in Upload-Length, which the TUS client sets itself.
+    headers = _build_headers(config=config, account_name=account_name)
     for key, value in headers.items():
         tus_client_obj.headers[key] = value
     storage_path = _tus_storage_path(metadata["filename"])
@@ -416,28 +430,120 @@ def _tus_upload_file(
     )
 
 
-# Fallback limit for a service that does not report one; it matches the
-# service default. Guessing low is safe: the file just takes the TUS path,
-# which works at any size. Probing with a PUT is not, since requests sends
-# the whole body before the 413 comes back.
-_ASSUMED_MAX_PUT_BYTES = 1 << 30  # 1 GiB
+def _tus_create_with_upload(
+    config: Config,
+    identifier: str,
+    path: str,
+    size: int,
+    metadata: dict,
+    account_name: str | None,
+) -> dict | None:
+    """Ingest ``path`` with a single TUS creation-with-upload POST.
 
-_UPLOAD_LIMIT_CACHE: dict[str, int] = {}
-
-
-def _max_put_bytes(config: Config) -> int:
-    """Return the largest body that PUT /file accepts.
-
-    Read from the service status once per host, falling back to
-    ``_ASSUMED_MAX_PUT_BYTES``.
+    The caller builds the ``Upload-Metadata`` dict. Returns the file's
+    metadata, or ``None`` when the caller must retry over chunked TUS: a 413,
+    or an answer that broke the connection before the body was fully sent.
     """
-    if config.host not in _UPLOAD_LIMIT_CACHE:
+    url = f"{config.host}/tus"
+    extra = {
+        "Tus-Resumable": "1.0.0",
+        "Upload-Length": str(size),
+        "Upload-Metadata": _encode_tus_metadata(metadata),
+    }
+    if size:
+        # An empty body gets no Content-Length, which the server refuses; a
+        # plain create completes a zero-length upload anyway.
+        extra["Content-Type"] = "application/offset+octet-stream"
+    headers = _build_headers(config, extra=extra, account_name=account_name)
+    verify_ssl = _verify_param(config)
+
+    def do_request():
+        with open(path, "rb") as f:
+            return requests.post(
+                url,
+                headers=headers,
+                data=f if size else b"",
+                verify=verify_ssl,
+                allow_redirects=False,
+            )
+
+    try:
+        response = _request_with_retry(
+            do_request, config, f"Failed to ingest file {identifier}"
+        )
+    except (
+        requests.ConnectionError,
+        requests.exceptions.ChunkedEncodingError,
+    ):
+        # An early 413/409/503 stops the server reading mid-body, which
+        # surfaces as a broken connection. Chunked TUS gets the real answer.
+        return None
+    if response.status_code == 201:
+        # 201 says the resource was created, not that every byte arrived: a
+        # short body still answers 201. An empty file reports no offset.
+        offset = response.headers.get("Upload-Offset")
+        if size and (offset is None or int(offset) != size):
+            raise TapestClientError(
+                f"Failed to ingest file {identifier}: the server stored "
+                f"{offset} of {size} bytes"
+            )
+        # The creation-with-upload response has no body; fetch the record.
+        return retrieve_file_metadata(
+            config=config, identifier=identifier, account_name=account_name
+        )
+    # A 409 with the identical-duplicate marker is an idempotent success.
+    if response.status_code == 409:
         try:
-            limit = retrieve_status(config).get("max_non_tus_upload_bytes")
-        except TapestClientError:
-            limit = None
-        _UPLOAD_LIMIT_CACHE[config.host] = limit or _ASSUMED_MAX_PUT_BYTES
-    return _UPLOAD_LIMIT_CACHE[config.host]
+            body = response.json()
+        except ValueError:
+            body = {}
+        if body.get("error") == "identical_duplicate":
+            return body.get("metadata") or body
+    # Body too large; the caller retries over chunked TUS.
+    if response.status_code == 413:
+        return None
+    raise TapestClientError(
+        f"Failed to ingest file {identifier}: "
+        f"{response.status_code} {response.text}"
+    )
+
+
+def _tus_create_with_upload_file(
+    config: Config,
+    identifier: str,
+    path: str,
+    checksum: str | None = None,
+    account_name: str | None = None,
+) -> dict | None:
+    """Build the ingest Upload-Metadata from a local file, then send it as a
+    single TUS creation-with-upload POST.
+
+    See :func:`_tus_create_with_upload` for the return value (``None`` on a
+    413 that asks the caller to fall back to chunked TUS).
+    """
+    stat = Path(path).stat()
+    if checksum is None:
+        checksum = generate_checksum(local_file_pathname=path)
+    created = datetime.fromtimestamp(stat.st_ctime, timezone.utc).strftime(
+        TIMESTAMP_FORMAT
+    )
+    modified = datetime.fromtimestamp(stat.st_mtime, timezone.utc).strftime(
+        TIMESTAMP_FORMAT
+    )
+    metadata = {
+        "filename": normalize_identifier(identifier=identifier),
+        "X-TAPEST-Checksum": checksum,
+        "X-TAPEST-Created": created,
+        "X-TAPEST-Modified": modified,
+    }
+    return _tus_create_with_upload(
+        config=config,
+        identifier=identifier,
+        path=path,
+        size=stat.st_size,
+        metadata=metadata,
+        account_name=account_name,
+    )
 
 
 def ingest_file(
@@ -449,8 +555,10 @@ def ingest_file(
 ) -> dict:
     """Ingest a local file and return its metadata.
 
-    A single stat() call is used to collect size, creation time and
-    modification time, avoiding redundant filesystem round-trips.
+    A file that fits in one request body is sent as a single TUS
+    creation-with-upload POST; larger files, or a body the server refuses as
+    too large (413), use chunked TUS. The threshold is
+    ``config.tus_creation_with_upload_max_size`` (default 1 GiB).
 
     The ``identifier`` is normalized to canonical leading-slash form
     by the client, and to UTF-8 NFC by the API on receive. The
@@ -470,67 +578,22 @@ def ingest_file(
     if checksum is None:
         checksum = generate_checksum(local_file_pathname=path)
 
-    # Files over the PUT limit go to the TUS endpoint instead.
-    if stat.st_size > _max_put_bytes(config):
-        return _tus_upload_file(
+    if stat.st_size <= _creation_with_upload_max(config):
+        result = _tus_create_with_upload_file(
             config=config,
             identifier=identifier,
             path=local_file_pathname,
             checksum=checksum,
             account_name=account_name,
         )
-    created = datetime.fromtimestamp(stat.st_ctime, timezone.utc).strftime(
-        TIMESTAMP_FORMAT
-    )
-    modified = datetime.fromtimestamp(stat.st_mtime, timezone.utc).strftime(
-        TIMESTAMP_FORMAT
-    )
-
-    url = _file_url(config, identifier)
-    headers = _build_headers(
-        config,
-        extra={
-            "X-TAPEST-Size": str(stat.st_size),
-            "X-TAPEST-Checksum": checksum,
-            "X-TAPEST-Created": created,
-            "X-TAPEST-Modified": modified,
-        },
+        if result is not None:
+            return result
+    return _tus_upload_file(
+        config=config,
+        identifier=identifier,
+        path=local_file_pathname,
+        checksum=checksum,
         account_name=account_name,
-    )
-    verify_ssl = _verify_param(config)
-
-    def do_request():
-        with open(path, "rb") as f:
-            return requests.put(
-                url, headers=headers, data=f, stream=True, verify=verify_ssl
-            )
-
-    response = _request_with_retry(
-        do_request, config, f"Failed to ingest file {identifier}"
-    )
-    if response.status_code == 201:
-        return response.json()
-    # A 409 with the identical-duplicate marker is an idempotent success.
-    if response.status_code == 409:
-        try:
-            body = response.json()
-        except ValueError:
-            body = {}
-        if body.get("error") == "identical_duplicate":
-            # Idempotent success: return the existing file's metadata.
-            return body.get("metadata") or body
-    # The service refused the body as too large; retry over TUS.
-    if response.status_code == 413:
-        return _tus_upload_file(
-            config=config,
-            identifier=identifier,
-            path=local_file_pathname,
-            checksum=checksum,
-            account_name=account_name,
-        )
-    raise TapestClientError(
-        f"Failed to ingest file {identifier}: "
-        f"{response.status_code} {response.text}"
     )
 
 
@@ -539,20 +602,17 @@ def recache_file(
     identifier: str,
     local_file_pathname: str,
     account_name: str | None = None,
-    use_tus: bool = True,
     chunk_size: str | None = None,
 ) -> dict:
-    """Re-upload a cached file, verifying it matches.
+    """Re-upload a cached file over TUS, verifying it matches.
 
-    Uploads over TUS by default; ``use_tus=False`` sends a single PUT instead,
-    which can be faster for small files.
+    A file that fits in one request body is sent as a single TUS
+    creation-with-upload POST; larger files use chunked TUS.
 
     See :func:`ingest_file` for the semantics of ``account_name``.
 
-    :param use_tus: Upload over TUS (default) or a single PUT when False.
     :param chunk_size: TUS chunk size; falls back to
-        ``config.tus_chunk_size`` if unset. Ignored when ``use_tus`` is
-        False.
+        ``config.tus_chunk_size`` if unset.
     """
     path = Path(local_file_pathname)
     file_metadata = retrieve_file_metadata(
@@ -572,53 +632,34 @@ def recache_file(
             "Local file checksum does not match ingested checksum"
         )
 
-    if use_tus:
-        # Identity fields come from the server record to preserve timestamps.
-        metadata = {
-            "filename": normalize_identifier(identifier=identifier),
-            "X-TAPEST-Checksum": file_metadata["checksum"],
-            "X-TAPEST-Created": file_metadata["created"],
-            "X-TAPEST-Modified": file_metadata["modified"],
-            "X-TAPEST-Recache": "true",
-        }
-        return _tus_upload(
+    # Identity fields come from the server record to preserve timestamps.
+    metadata = {
+        "filename": normalize_identifier(identifier=identifier),
+        "X-TAPEST-Checksum": file_metadata["checksum"],
+        "X-TAPEST-Created": file_metadata["created"],
+        "X-TAPEST-Modified": file_metadata["modified"],
+        "X-TAPEST-Recache": "true",
+    }
+
+    if stat.st_size <= _creation_with_upload_max(config):
+        result = _tus_create_with_upload(
             config=config,
             identifier=identifier,
             path=str(path),
             size=file_metadata["size"],
             metadata=metadata,
             account_name=account_name,
-            chunk_size=chunk_size,
         )
-
-    url = _file_url(config, identifier)
-    headers = _build_headers(
-        config,
-        extra={
-            "X-TAPEST-Size": str(file_metadata["size"]),
-            "X-TAPEST-Checksum": file_metadata["checksum"],
-            "X-TAPEST-Created": file_metadata["created"],
-            "X-TAPEST-Modified": file_metadata["modified"],
-            "X-TAPEST-Recache": "true",
-        },
+        if result is not None:
+            return result
+    return _tus_upload(
+        config=config,
+        identifier=identifier,
+        path=str(path),
+        size=file_metadata["size"],
+        metadata=metadata,
         account_name=account_name,
-    )
-    verify_ssl = _verify_param(config)
-
-    def do_request():
-        with open(path, "rb") as f:
-            return requests.put(
-                url, headers=headers, data=f, stream=True, verify=verify_ssl
-            )
-
-    response = _request_with_retry(
-        do_request, config, f"Failed to recache file {identifier}"
-    )
-    if response.status_code == 201:
-        return response.json()
-    raise TapestClientError(
-        f"Failed to recache file {identifier}: "
-        f"{response.status_code} {response.text}"
+        chunk_size=chunk_size,
     )
 
 

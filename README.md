@@ -92,9 +92,12 @@ For per-command help, use `tapest-client <command> --help`.
 | `--config`  | Configuration file             |
 | `--host`    | API host URL                   |
 
-The TUS upload uses the chunk size of `tus_chunk_size` in the configuration
-file. The default is `16 MiB`. A large chunk can give more speed on a fast
-network.
+Uploads use the TUS protocol. A file that fits in one request goes as a single
+TUS creation-with-upload POST. A larger file goes in chunks. The field
+`tus_creation_with_upload_max_size` in the configuration file gives the largest
+file that goes as one POST; the default is `1 GiB`. The chunked upload uses the
+chunk size of `tus_chunk_size`; the default is `16 MiB`. A large chunk can give
+more speed on a fast network.
 
 ### Ingest (upload)
 

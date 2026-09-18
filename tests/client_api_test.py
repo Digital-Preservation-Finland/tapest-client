@@ -10,6 +10,7 @@ import re
 from base64 import b64encode
 
 import pytest
+import requests
 from tusclient.exceptions import TusCommunicationError
 
 from tapest_client import client
@@ -68,10 +69,14 @@ def _download_response(data=b"hello world"):
 
 
 def test_ingest_success(tmp_path, config_fx, requests_fx):
-    """Successful ingest returns metadata from API."""
+    """A small file ingests via a single creation-with-upload POST; the
+    metadata is fetched afterwards and returned."""
     path = tmp_path / "file.dat"
     path.write_bytes(b"hello world")
-    requests_fx.responses["put"] = mock_response(201, json_data=SAMPLE_METADATA)
+    requests_fx.responses["post"] = mock_response(
+        201, headers={"Upload-Offset": "11"}
+    )
+    requests_fx.responses["get"] = mock_response(200, json_data=SAMPLE_METADATA)
     result = ingest_file(config_fx(), "/pkg/file.dat", str(path))
     assert result == SAMPLE_METADATA
 
@@ -80,7 +85,7 @@ def test_ingest_http_error(tmp_path, config_fx, requests_fx):
     """HTTP error raises TapestClientError with status code."""
     path = tmp_path / "file.dat"
     path.write_bytes(b"hello world")
-    requests_fx.responses["put"] = mock_response(500, text="Server Error")
+    requests_fx.responses["post"] = mock_response(500, text="Server Error")
     with pytest.raises(TapestClientError, match="500"):
         ingest_file(config_fx(), "/pkg/file.dat", str(path))
 
@@ -97,7 +102,7 @@ def test_ingest_identical_duplicate_returns_metadata(
         "error": "identical_duplicate",
         "metadata": SAMPLE_METADATA,
     }
-    requests_fx.responses["put"] = mock_response(409, json_data=body)
+    requests_fx.responses["post"] = mock_response(409, json_data=body)
     result = ingest_file(config_fx(), "/pkg/file.dat", str(path))
     assert result == SAMPLE_METADATA
 
@@ -110,7 +115,7 @@ def test_ingest_conflict_without_marker_raises_the_server_error(
     """
     path = tmp_path / "file.dat"
     path.write_bytes(b"hello world")
-    requests_fx.responses["put"] = mock_response(
+    requests_fx.responses["post"] = mock_response(
         409,
         json_data={"detail": "A file already exists"},
         text='{"detail": "A file already exists"}',
@@ -123,16 +128,19 @@ def test_ingest_conflict_without_marker_raises_the_server_error(
 
 
 def test_recache_success(tmp_path, config_fx, requests_fx):
-    """Successful PUT recache verifies file and returns metadata."""
+    """A small recache uploads via a single creation-with-upload POST and
+    returns metadata."""
     path = tmp_path / "file.dat"
     path.write_bytes(b"hello world")
     requests_fx.responses["get"] = mock_response(200, json_data=SAMPLE_METADATA)
-    requests_fx.responses["put"] = mock_response(201, json_data=SAMPLE_METADATA)
-    result = recache_file(
-        config_fx(), "/pkg/file.dat", str(path), use_tus=False
+    requests_fx.responses["post"] = mock_response(
+        201, headers={"Upload-Offset": "11"}
     )
+    result = recache_file(config_fx(), "/pkg/file.dat", str(path))
     assert result == SAMPLE_METADATA
-    assert requests_fx.calls["put"]["headers"]["X-TAPEST-Recache"] == "true"
+    # The recache flag rides in Upload-Metadata, not in a header.
+    meta_header = requests_fx.calls["post"]["headers"]["Upload-Metadata"]
+    assert f"X-TAPEST-Recache {b64encode(b'true').decode()}" in meta_header
 
 
 def test_recache_size_mismatch(tmp_path, config_fx, requests_fx):
@@ -142,7 +150,7 @@ def test_recache_size_mismatch(tmp_path, config_fx, requests_fx):
     meta = {**SAMPLE_METADATA, "size": 99999}
     requests_fx.responses["get"] = mock_response(200, json_data=meta)
     with pytest.raises(TapestClientError, match="size"):
-        recache_file(config_fx(), "/pkg/file.dat", str(path), use_tus=False)
+        recache_file(config_fx(), "/pkg/file.dat", str(path))
 
 
 def test_recache_checksum_mismatch(tmp_path, config_fx, requests_fx):
@@ -152,7 +160,7 @@ def test_recache_checksum_mismatch(tmp_path, config_fx, requests_fx):
     meta = {**SAMPLE_METADATA, "checksum": "sha256:bad"}
     requests_fx.responses["get"] = mock_response(200, json_data=meta)
     with pytest.raises(TapestClientError, match="checksum"):
-        recache_file(config_fx(), "/pkg/file.dat", str(path), use_tus=False)
+        recache_file(config_fx(), "/pkg/file.dat", str(path))
 
 
 def test_recache_tus_success(tmp_path, config_fx, mock_tus_endpoints):
@@ -572,10 +580,11 @@ def test_tus_upload_of_same_file_under_two_identifiers(tmp_path, config_fx):
 
 
 @pytest.mark.usefixtures("mock_tus_endpoints")
-def test_ingest_file_uses_tus_when_the_file_is_larger_than_the_limit(
+def test_ingest_file_uses_chunked_tus_over_the_threshold(
     tmp_path, config_fx, monkeypatch
 ):
-    """A file that is larger than the limit of the service goes to TUS."""
+    """A file larger than the creation-with-upload threshold uses chunked
+    TUS."""
     path = tmp_path / "big.dat"
     path.write_bytes(b"x" * 100)
     used = {}
@@ -584,31 +593,53 @@ def test_ingest_file_uses_tus_when_the_file_is_larger_than_the_limit(
         used["tus"] = True
         return {"ok": True}
 
-    client._UPLOAD_LIMIT_CACHE.clear()
-    monkeypatch.setattr(client, "_max_put_bytes", lambda config: 10)
+    monkeypatch.setattr(client, "_creation_with_upload_max", lambda config: 10)
     monkeypatch.setattr(client, "_tus_upload_file", fake_tus)
     result = client.ingest_file(config_fx(), "/big.dat", str(path))
     assert used.get("tus") is True
     assert result == {"ok": True}
 
 
-def test_ingest_file_uses_put_when_the_file_is_smaller_than_the_limit(
+def test_ingest_file_uses_creation_with_upload_under_the_threshold(
     tmp_path, config_fx, monkeypatch, requests_fx
 ):
-    """A file that is smaller than the limit uses PUT."""
+    """A file at or under the threshold uses a single creation-with-upload
+    POST, not chunked TUS."""
     path = tmp_path / "small.dat"
     path.write_bytes(b"x" * 5)
-    requests_fx.responses["put"] = mock_response(
-        201, json_data=SAMPLE_METADATA
+    requests_fx.responses["post"] = mock_response(
+        201, headers={"Upload-Offset": "5"}
     )
+    requests_fx.responses["get"] = mock_response(200, json_data=SAMPLE_METADATA)
 
     def fail_tus(**kwargs):
-        raise AssertionError("TUS must not be used")
+        raise AssertionError("chunked TUS must not be used")
 
-    monkeypatch.setattr(client, "_max_put_bytes", lambda config: 1000)
+    monkeypatch.setattr(
+        client, "_creation_with_upload_max", lambda config: 1000
+    )
     monkeypatch.setattr(client, "_tus_upload_file", fail_tus)
     client.ingest_file(config_fx(), "/small.dat", str(path))
-    assert requests_fx.calls["put"] is not None
+    assert requests_fx.calls["post"] is not None
+
+
+def test_ingest_creation_with_upload_413_falls_back_to_chunked(
+    tmp_path, config_fx, monkeypatch, requests_fx
+):
+    """A 413 from the creation-with-upload POST falls back to chunked TUS."""
+    path = tmp_path / "small.dat"
+    path.write_bytes(b"x" * 5)
+    requests_fx.responses["post"] = mock_response(413)
+    used = {}
+
+    def fake_tus(**kwargs):
+        used["tus"] = True
+        return SAMPLE_METADATA
+
+    monkeypatch.setattr(client, "_tus_upload_file", fake_tus)
+    result = client.ingest_file(config_fx(), "/small.dat", str(path))
+    assert used.get("tus") is True
+    assert result == SAMPLE_METADATA
 
 
 @pytest.mark.usefixtures("mock_tus_endpoints")
@@ -634,22 +665,90 @@ def test_tus_upload_uses_the_chunk_size_of_the_configuration(
     assert seen["chunk_size"] == "500 MiB"
 
 
-def test_max_put_bytes_uses_the_limit_of_the_service(config_fx, monkeypatch):
-    """The limit comes from the status of the service."""
-    client._UPLOAD_LIMIT_CACHE.clear()
-    monkeypatch.setattr(
-        client, "retrieve_status",
-        lambda config: {"max_non_tus_upload_bytes": 4242},
-    )
-    assert client._max_put_bytes(config_fx()) == 4242
+def test_creation_with_upload_max_from_config(config_fx):
+    """The threshold is read from the client config."""
+    config = config_fx()
+    config.tus_creation_with_upload_max_size = "2 MiB"
+    assert client._creation_with_upload_max(config) == 2 * 1024 * 1024
 
 
-def test_max_put_bytes_assumes_a_limit_when_the_service_gives_none(
-    config_fx, monkeypatch
+def test_creation_with_upload_max_defaults_to_1_gib(config_fx):
+    """The threshold defaults to 1 GiB when the config leaves it unset."""
+    assert client._creation_with_upload_max(config_fx()) == 1 << 30
+
+
+def test_creation_with_upload_sends_the_protocol_headers(
+    tmp_path, config_fx, requests_fx
 ):
-    """An older service gives no limit, thus the client assumes one."""
-    client._UPLOAD_LIMIT_CACHE.clear()
-    monkeypatch.setattr(client, "retrieve_status", lambda config: {})
-    assert client._max_put_bytes(config_fx()) == (
-        client._ASSUMED_MAX_PUT_BYTES
+    """The creation-with-upload POST carries the headers the TUS server
+    needs. Without any one of them the server refuses the request or
+    silently creates an empty resource."""
+    path = tmp_path / "file.dat"
+    path.write_bytes(b"hello world")
+    requests_fx.responses["post"] = mock_response(
+        201, headers={"Upload-Offset": "11"}
     )
+    requests_fx.responses["get"] = mock_response(200, json_data=SAMPLE_METADATA)
+
+    ingest_file(config_fx(), "/pkg/file.dat", str(path))
+
+    headers = requests_fx.calls["post"]["headers"]
+    assert headers["Tus-Resumable"] == "1.0.0"
+    assert headers["Upload-Length"] == "11"
+    assert headers["Content-Type"] == "application/offset+octet-stream"
+    assert "Upload-Metadata" in headers
+
+
+def test_ingest_empty_file_sends_an_empty_body(
+    tmp_path, config_fx, requests_fx
+):
+    """A zero-byte file is sent as a plain create with no body: an empty
+    body gets no Content-Length, which the server refuses."""
+    path = tmp_path / "empty.dat"
+    path.write_bytes(b"")
+    requests_fx.responses["post"] = mock_response(201)
+    requests_fx.responses["get"] = mock_response(200, json_data=SAMPLE_METADATA)
+
+    result = ingest_file(config_fx(), "/pkg/empty.dat", str(path))
+
+    assert result == SAMPLE_METADATA
+    assert requests_fx.calls["post"]["data"] == b""
+    headers = requests_fx.calls["post"]["headers"]
+    assert headers["Upload-Length"] == "0"
+    assert "Content-Type" not in headers
+
+
+def test_creation_with_upload_short_write_is_an_error(
+    tmp_path, config_fx, requests_fx
+):
+    """A 201 only says the resource was created. When the reported offset is
+    short of the file size the body did not arrive in full, so the ingest
+    must fail rather than report success."""
+    path = tmp_path / "file.dat"
+    path.write_bytes(b"hello world")
+    requests_fx.responses["post"] = mock_response(
+        201, headers={"Upload-Offset": "3"}
+    )
+    with pytest.raises(TapestClientError, match="3 of 11 bytes"):
+        ingest_file(config_fx(), "/pkg/file.dat", str(path))
+
+
+def test_creation_with_upload_broken_connection_falls_back_to_chunked(
+    tmp_path, config_fx, monkeypatch, requests_fx
+):
+    """An early refusal stops the server reading mid-body, which surfaces as
+    a broken connection. The upload then goes over chunked TUS."""
+    path = tmp_path / "file.dat"
+    path.write_bytes(b"hello world")
+    requests_fx.responses["post"] = requests.ConnectionError("broken pipe")
+    used = {}
+
+    def fake_tus(**kwargs):
+        used["tus"] = True
+        return SAMPLE_METADATA
+
+    monkeypatch.setattr(client, "_tus_upload_file", fake_tus)
+    result = ingest_file(config_fx(), "/pkg/file.dat", str(path))
+
+    assert used.get("tus") is True
+    assert result == SAMPLE_METADATA
