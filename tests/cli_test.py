@@ -457,6 +457,16 @@ def test_print_metadata_table_renders_common_prefixes(capsys):
     assert "/q/  (directory)" in out
 
 
+def test_print_metadata_table_common_prefixes_without_metadata_key(capsys):
+    """A directory listing omits the metadata key, so detect it by prefixes."""
+    _print_metadata_table(
+        {"files": 0, "commonPrefixes": ["/p/", "/q/"]}
+    )
+    out = capsys.readouterr().out
+    assert "/p/  (directory)" in out
+    assert "/q/  (directory)" in out
+
+
 def test_print_metadata_table_no_data_falls_back_to_json(capsys):
     """With neither a metadata list nor common prefixes, fall back to JSON."""
     _print_metadata_table({"metadata": None})

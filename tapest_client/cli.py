@@ -401,7 +401,7 @@ def _print_metadata_table(result: dict) -> None:
     only when the shape has neither a metadata list nor common prefixes.
     Accepts either a query envelope or a single file document.
     """
-    if "metadata" in result:
+    if "metadata" in result or "commonPrefixes" in result:
         items = result.get("metadata")
         prefixes = result.get("commonPrefixes")
         if items is None and not prefixes:
