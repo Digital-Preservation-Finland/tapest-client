@@ -26,6 +26,7 @@ from tapest_client.client import (
     retrieve_file_metadata,
     update_file_metadata,
     retrieve_metadata,
+    mark_required,
     retrieve_status,
     _tus_upload_file,
 )
@@ -362,6 +363,37 @@ def test_retrieve_metadata_parent_passthrough(config_fx, requests_fx):
     assert requests_fx.calls["post"]["json"] == {
         "parent": "/dir/",
     }
+
+
+def test_mark_required_success(config_fx, requests_fx):
+    """A successful mark returns the service summary and forwards the query."""
+    summary = {"matched": 3, "totalSize": 99, "marked": 2}
+    requests_fx.responses["post"] = mock_response(200, json_data=summary)
+    result = mark_required(config_fx(), query={"prefixes": ["/p"]})
+    assert result == summary
+    assert requests_fx.calls["post"]["json"] == {"prefixes": ["/p"]}
+
+
+def test_mark_required_refusal_raises_with_detail(config_fx, requests_fx):
+    """A refusal (e.g. the set exceeds the maximum) surfaces the service
+    detail, not the raw body."""
+    requests_fx.responses["post"] = mock_response(
+        413,
+        json_data={"detail": "Extract size 9 bytes exceeds the maximum 1"},
+    )
+    with pytest.raises(TapestClientError, match="exceeds the maximum"):
+        mark_required(config_fx(), query={"prefixes": ["/p"]})
+
+
+def test_mark_required_refusal_non_dict_body_does_not_crash(
+    config_fx, requests_fx
+):
+    """A JSON error body that is not an object surfaces cleanly, no crash."""
+    requests_fx.responses["post"] = mock_response(
+        413, json_data=["too large"], text='["too large"]'
+    )
+    with pytest.raises(TapestClientError, match="413"):
+        mark_required(config_fx(), query={"prefixes": ["/p"]})
 
 
 def test_retrieve_status_success(config_fx, requests_fx):

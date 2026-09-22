@@ -125,6 +125,23 @@ def _file_url(config: Config, identifier: str) -> str:
     return f"{config.host}/file?identifier={encoded}"
 
 
+def _normalize_query(query: dict | None) -> dict | None:
+    """Return a copy of the query with its identifier fields leading-slash
+    normalized.
+
+    Regexes are patterns and the page token is opaque, so leave them
+    verbatim. Shared by /metadata and /recall so both match the same files.
+    The caller's dict is not changed.
+    """
+    if not query:
+        return query
+    normalized = dict(query)
+    for field in ("prefixes", "identifiers"):
+        if normalized.get(field):
+            normalized[field] = normalize_identifier(normalized[field])
+    return normalized
+
+
 def _metadata_url(config: Config, identifier: str | None = None) -> str:
     """Build /metadata endpoint URL."""
     if identifier:
@@ -850,12 +867,7 @@ def retrieve_metadata(
     url = _metadata_url(config)
     headers = _build_headers(config, storage_name, account_name=account_name)
     verify_ssl = _verify_param(config)
-    if query:
-        for target_field in ("prefixes", "identifiers"):
-            if query.get(target_field):
-                query[target_field] = normalize_identifier(
-                    query[target_field]
-                )
+    query = _normalize_query(query)
 
     response = requests.post(
         url, json=query or {}, headers=headers, verify=verify_ssl
@@ -864,6 +876,46 @@ def retrieve_metadata(
         return response.json()
     raise TapestClientError(
         f"Failed to retrieve metadata: {response.status_code} {response.text}"
+    )
+
+
+def _recall_url(config: Config) -> str:
+    """Build /recall endpoint URL."""
+    return f"{config.host}/recall"
+
+
+def mark_required(
+    config: Config,
+    query: dict | None = None,
+    account_name: str | None = None,
+) -> dict:
+    """Mark every file matching the query required for recall, in one call.
+
+    Returns the service summary ``{matched, totalSize, marked}``. Raises
+    TapestClientError with the service detail when the extract is refused,
+    for example when the matched set is larger than the configured maximum.
+
+    See :func:`ingest_file` for the semantics of ``account_name``.
+    """
+    url = _recall_url(config)
+    headers = _build_headers(config, account_name=account_name)
+    verify_ssl = _verify_param(config)
+    query = _normalize_query(query)
+
+    response = requests.post(
+        url, json=query or {}, headers=headers, verify=verify_ssl
+    )
+    if response.status_code == 200:
+        return response.json()
+    detail = response.text
+    try:
+        payload = response.json()
+        if isinstance(payload, dict):
+            detail = payload.get("detail", detail)
+    except ValueError:
+        pass
+    raise TapestClientError(
+        f"Failed to mark files required: {response.status_code} {detail}"
     )
 
 

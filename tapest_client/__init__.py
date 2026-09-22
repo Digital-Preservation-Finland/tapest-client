@@ -24,6 +24,7 @@ from .client import (
     retrieve_file_metadata,
     update_file_metadata,
     retrieve_metadata,
+    mark_required,
     retrieve_status,
 )
 
@@ -45,5 +46,6 @@ __all__ = [
     "retrieve_file_metadata",
     "update_file_metadata",
     "retrieve_metadata",
+    "mark_required",
     "retrieve_status",
 ]

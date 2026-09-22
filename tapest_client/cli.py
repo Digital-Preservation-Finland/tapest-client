@@ -155,14 +155,19 @@ def build_parser() -> argparse.ArgumentParser:
         "positional argument is the destination directory",
     )
     sub.add_argument(
-        "--skip",
-        action="store_true",
-        help="skip files that already exist and match",
-    )
-    sub.add_argument(
         "--force",
         action="store_true",
-        help="overwrite files that already exist",
+        help="overwrite local files that differ from the record (identical "
+        "files are always left as they are)",
+    )
+    sub.add_argument(
+        "--wait",
+        choices=["poll", "none", "forever"],
+        default="poll",
+        help="how long to wait for files still on tape: 'poll' retries a "
+        "bounded number of times then gives up (default); 'none' takes only "
+        "what is cached now and exits; 'forever' polls until the whole set "
+        "arrives",
     )
     sub.set_defaults(func=_run_extract)
 
@@ -469,22 +474,34 @@ def _extract_targets(args: argparse.Namespace) -> tuple[list[str], str]:
 def _extract_to_file(
     config: Config, identifier: str, dest: str, args: argparse.Namespace
 ) -> None:
-    """Extract one file to a target file name."""
+    """Extract one file to a target file name.
+
+    Skip an existing identical file; --force overwrites one that differs, and
+    a file that differs without --force is an error. --wait bounds the wait
+    for a file still on tape, the same as for a directory.
+    """
     logger.info(
         "Extracting file with identifier '%s' to local pathname '%s' ...",
         identifier,
         dest,
     )
-    result = _extract_one(
-        config,
-        tapest_client.retrieve_file_metadata(config, identifier),
-        Path(dest),
-        args.skip,
-        args.force,
-    )
-    if result is None:
+    file_metadata = tapest_client.retrieve_file_metadata(config, identifier)
+    path = Path(dest)
+    if not _should_extract(file_metadata, path, args.force):
         return
-    _print_json(result)
+    _, unavailable = _collect_files(config, [(file_metadata, path)], args.wait)
+    if unavailable:
+        if args.wait == "poll":
+            raise TapestClientError(
+                f"File {identifier} unavailable after "
+                f"{max(1, config.max_retry_attempts)} attempts",
+                exit_code=117,
+            )
+        logger.warning(
+            "File %s not yet available; re-run extract to fetch it",
+            identifier,
+        )
+        return
     logger.info(
         "Successfully extracted file with identifier '%s' to "
         "local pathname '%s'",
@@ -523,38 +540,52 @@ def _extract_to_directory(
 ) -> None:
     """Extract every file that matches the query into a directory.
 
-    Read every page of the query, request each file once to mark the whole
-    set required, take the files that are ready, then come back for the rest
-    until they arrive or the attempts run out. A file that never arrives does
-    not stop the others.
+    Mark the whole matched set required in one call, then read each file as
+    it becomes available. Already-present identical files are left as they
+    are. A file that never arrives does not stop the others. ``--wait``
+    decides how long to wait for files on tape.
     """
     args.identifier = [
         normalize_identifier(i) for i in identifiers
     ] or None
     query = _build_query(args)
-    logger.info("Retrieving metadata for files to extract ...")
-    metadata_list = _retrieve_all_metadata(config, query)
-
-    if not metadata_list:
-        logger.info("No files match the specified criteria")
-        return
 
     root = Path(dest)
     if not root.is_dir():
         raise TapestClientError(f"Directory does not exist: {dest}")
 
+    logger.info("Marking matching files required ...")
+    summary = tapest_client.mark_required(config, query)
+    if not summary.get("matched"):
+        logger.info("No files match the specified criteria")
+        return
+    logger.info(
+        "Matched %d file(s), %d bytes; marked %d for recall",
+        summary.get("matched", 0),
+        summary.get("totalSize", 0),
+        summary.get("marked", 0),
+    )
+
+    logger.info("Retrieving metadata for files to extract ...")
+    metadata_list = _retrieve_all_metadata(config, query)
     logger.info("Extracting %d file(s) to '%s' ...", len(metadata_list), dest)
 
     pending = []
     skipped_count = 0
+    conflicts = []
     for file_metadata in metadata_list:
         path = root / file_metadata["identifier"].lstrip("/")
-        if _should_extract(file_metadata, path, args.skip, args.force):
-            pending.append((file_metadata, path))
-        else:
-            skipped_count += 1
+        # Skip identical files, --force overwrites. A differing file is a
+        # conflict: leave it and go on, so one edit does not stop the batch.
+        try:
+            if _should_extract(file_metadata, path, args.force):
+                pending.append((file_metadata, path))
+            else:
+                skipped_count += 1
+        except FileAlreadyExistsError:
+            conflicts.append(str(path))
 
-    extracted_count, unavailable = _collect_files(config, pending)
+    extracted_count, unavailable = _collect_files(config, pending, args.wait)
 
     if skipped_count:
         logger.warning(
@@ -563,32 +594,64 @@ def _extract_to_directory(
     logger.info(
         "Successfully extracted %d file(s) to '%s'", extracted_count, dest
     )
+    if conflicts:
+        logger.warning(
+            "%d file(s) differ from the record and were left as is; re-run "
+            "with --force to overwrite: %s",
+            len(conflicts),
+            ", ".join(conflicts),
+        )
     if unavailable:
-        max_attempts = max(1, config.max_retry_attempts)
+        if args.wait == "poll":
+            raise TapestClientError(
+                f"{len(unavailable)} file(s) unavailable after "
+                f"{max(1, config.max_retry_attempts)} attempts"
+                + (
+                    f" ({len(conflicts)} more differ from the record)"
+                    if conflicts
+                    else ""
+                )
+                + f": {', '.join(unavailable)}",
+                exit_code=117,
+            )
+        logger.warning(
+            "%d file(s) not yet available; re-run extract to fetch them: %s",
+            len(unavailable),
+            ", ".join(unavailable),
+        )
+    if conflicts:
         raise TapestClientError(
-            f"{len(unavailable)} file(s) unavailable after "
-            f"{max_attempts} attempts: {', '.join(unavailable)}",
-            exit_code=117,
+            f"{len(conflicts)} file(s) differ from the record; re-run with "
+            "--force to overwrite",
+            exit_code=1,
         )
 
 
 def _collect_files(
-    config: Config, pending: list[tuple[dict, Path]]
+    config: Config,
+    pending: list[tuple[dict, Path]],
+    wait: str = "poll",
 ) -> tuple[int, list[str]]:
-    """Take the ready files across attempts and mark the rest required.
+    """Poll the service for the bytes, taking each file as it is ready.
 
-    The first attempt requests every file, which marks the not-ready ones
-    required so the service batches them in one recache. Later attempts come
-    back for the files that were not ready. Return the count extracted and the
-    identifiers that never arrived.
+    The files are already marked required by the up-front bulk call.
+    ``wait`` bounds the polling: 'poll' retries ``max_retry_attempts`` times
+    then gives up, 'none' makes one pass, 'forever' polls until nothing is
+    pending. Return the count extracted and the identifiers that never came.
     """
-    max_attempts = max(1, config.max_retry_attempts)
     default_duration = max(1, config.default_sleep_duration)
+    if wait == "none":
+        max_attempts = 1
+    elif wait == "forever":
+        max_attempts = None
+    else:
+        max_attempts = max(1, config.max_retry_attempts)
     extracted_count = 0
     sleep_seconds = 0
+    attempt = 0
 
-    for attempt in range(max_attempts):
-        if not pending:
+    while pending:
+        if max_attempts is not None and attempt >= max_attempts:
             break
         if attempt:
             time.sleep(sleep_seconds or default_duration)
@@ -605,6 +668,7 @@ def _collect_files(
                 still_pending.append((file_metadata, path))
                 sleep_seconds = max(sleep_seconds, retry_after)
         pending = still_pending
+        attempt += 1
 
     return extracted_count, [fm["identifier"] for fm, _ in pending]
 
@@ -627,19 +691,18 @@ def _run_extract(config: Config, args: argparse.Namespace) -> None:
 
 
 def _should_extract(
-    file_metadata: dict, path: Path, skip: bool, force: bool
+    file_metadata: dict, path: Path, force: bool
 ) -> bool:
-    """Decide whether a file must be fetched under --skip and --force.
+    """Decide whether a file must be fetched.
 
-    Returns False to leave an identical local file as it is.
+    An existing identical file is left as is (returns False). ``force``
+    overwrites one that differs; without it, a differing file is an error.
 
-    :raises FileAlreadyExistsError: If the path is taken and neither
-        option allows it to be reused or replaced.
+    :raises FileAlreadyExistsError: If the path holds a different file and
+        ``force`` is not set.
     """
     if not path.exists():
         return True
-    if not (skip or force):
-        raise FileAlreadyExistsError(f"File already exists at {path}")
     if tapest_client.is_same_file(
         str(path), file_metadata["size"], file_metadata["checksum"]
     ):
@@ -651,24 +714,6 @@ def _should_extract(
         raise FileAlreadyExistsError(f"File already exists at {path}")
     path.unlink()
     return True
-
-
-def _extract_one(
-    config: Config,
-    file_metadata: dict,
-    path: Path,
-    skip: bool,
-    force: bool,
-) -> dict | None:
-    """Extract one file to ``path`` under --skip and --force.
-
-    Returns None for a file that is left on disk as it is.
-    """
-    if not _should_extract(file_metadata, path, skip, force):
-        return None
-    return tapest_client.extract_file_with_metadata(
-        config, file_metadata, str(path)
-    )
 
 
 def _run_delete(config: Config, args: argparse.Namespace) -> None:
