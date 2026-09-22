@@ -905,19 +905,20 @@ def _ingest_one(
     local_path: str,
     skip: bool,
 ) -> dict | None:
-    """Ingest one file, with --skip accepting a file that is stored.
+    """Ingest one file. With --skip, do not send a file that is already
+    stored with the same content.
 
-    With --skip the stored metadata is read first, so a file that is
-    already stored is not sent again. Without it the upload goes straight
-    out and the service answers 409 for a taken identifier.
-
-    An identifier that has been used is not free again, not even after a
-    delete, so a local file whose content differs from the stored one is
-    an error.
+    With --skip the client reads the stored metadata first. A file already
+    stored with the same checksum is not sent again. A file stored with a
+    different checksum is an error: a re-ingest does not overwrite live
+    content. Delete the identifier first to reuse it. Without --skip the
+    upload goes straight out and the service answers 409 for a taken
+    identifier.
 
     Returns None for a file that is already stored.
 
-    :raises FileAlreadyExistsError: If a different file has the identifier.
+    :raises FileAlreadyExistsError: If the identifier is stored with
+        different content.
     """
     checksum = None
     if skip:
@@ -928,8 +929,8 @@ def _ingest_one(
         if existing is not None:
             if checksum != existing.get("checksum"):
                 raise FileAlreadyExistsError(
-                    f"A different file already exists with identifier "
-                    f"{identifier}: an identifier cannot be reused"
+                    f"A different file is already stored with identifier "
+                    f"{identifier}; delete it first to reuse the identifier"
                 )
             logger.info(
                 "Skipping file with identifier '%s': already stored",

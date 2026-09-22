@@ -969,8 +969,9 @@ def test_ingest_prints_one_json_line_per_file(
 def test_ingest_never_deletes_a_stored_file(tmp_path, config_fx, cli_fx):
     """The client does not delete a stored file to reuse its identifier.
 
-    An identifier that has been used is not free again, not even after a
-    delete, so a local file that differs is an error.
+    A re-ingest does not overwrite a file that is currently stored with
+    different content. The user must delete it first. So a local file that
+    differs from the stored one is an error, not an automatic replace.
     """
     path = tmp_path / "a.dat"
     path.write_bytes(b"hello world")
@@ -980,7 +981,7 @@ def test_ingest_never_deletes_a_stored_file(tmp_path, config_fx, cli_fx):
     )
     cli_fx("delete_file")
     cli_fx("ingest_file")
-    with pytest.raises(FileAlreadyExistsError, match="cannot be reused"):
+    with pytest.raises(FileAlreadyExistsError, match="delete it first"):
         _run_ingest(
             config_fx(),
             _ingest_args(paths=[str(path)], identifier="/a.dat", skip=True),
