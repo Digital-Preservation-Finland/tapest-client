@@ -648,6 +648,58 @@ def test_extract_files_reports_unavailable(
     assert [record["identifier"] for record in _jsonl(capsys)] == ["/a"]
 
 
+def test_extract_files_follows_pagination(
+    tmp_path, config_fx, cli_fx, monkeypatch, capsys
+):
+    """extract reads every page, so a match set larger than one page is
+    marked and collected in full, not only the first page."""
+    pages = {
+        None: {
+            "metadata": [{"identifier": "/a"}, {"identifier": "/b"}],
+            "nextPageToken": "TOKEN",
+        },
+        "TOKEN": {"metadata": [{"identifier": "/c"}]},
+    }
+    queries = []
+
+    def _retrieve(config, query, storage_name=None):
+        queries.append(dict(query))
+        return pages[query.get("page_token")]
+
+    monkeypatch.setattr(
+        "tapest_client.cli.tapest_client.retrieve_metadata", _retrieve
+    )
+    cli_fx("attempt_extract", return_value=(True, 0))
+    _run_extract(config_fx(), _extract_args(tmp_path))
+
+    assert [q.get("page_token") for q in queries] == [None, "TOKEN"]
+    extracted = [
+        args[0]["identifier"]
+        for args, _ in cli_fx.calls["attempt_extract"]
+    ]
+    assert extracted == ["/a", "/b", "/c"]
+    assert len(_jsonl(capsys)) == 3
+
+
+def test_extract_stops_on_repeated_page_token(
+    tmp_path, config_fx, cli_fx, monkeypatch
+):
+    """A service that echoes the same nextPageToken does not hang the loop."""
+    calls = []
+
+    def _retrieve(config, query, storage_name=None):
+        calls.append(query.get("page_token"))
+        return {"metadata": [{"identifier": "/a"}], "nextPageToken": "SAME"}
+
+    monkeypatch.setattr(
+        "tapest_client.cli.tapest_client.retrieve_metadata", _retrieve
+    )
+    cli_fx("attempt_extract", return_value=(True, 0))
+    _run_extract(config_fx(), _extract_args(tmp_path))
+
+    assert calls == [None, "SAME"]
+
+
 def _extract_args(dest, **overrides):
     """Build an extract args namespace for a destination directory."""
     defaults = dict(

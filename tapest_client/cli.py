@@ -493,6 +493,28 @@ def _extract_to_file(
     )
 
 
+def _retrieve_all_metadata(config: Config, query: dict) -> list[dict]:
+    """Return the metadata for every file that matches the query.
+
+    A metadata query returns one page of at most MAX_LIMIT rows plus a
+    nextPageToken. Follow the token so a broad extract works on the whole
+    matched set, not only the first page.
+    """
+    query = dict(query)
+    metadata_list = []
+    seen_tokens = set()
+    while True:
+        result = tapest_client.retrieve_metadata(config, query=query)
+        metadata_list.extend(result.get("metadata", []))
+        token = result.get("nextPageToken")
+        # Stop on a repeated token so a service that echoes one cannot hold
+        # the loop open forever.
+        if not token or token in seen_tokens:
+            return metadata_list
+        seen_tokens.add(token)
+        query["page_token"] = token
+
+
 def _extract_to_directory(
     config: Config,
     identifiers: list[str],
@@ -501,17 +523,17 @@ def _extract_to_directory(
 ) -> None:
     """Extract every file that matches the query into a directory.
 
-    Request each file once to mark the whole set required, take the files
-    that are ready, then come back for the rest until they arrive or the
-    attempts run out. A file that never arrives does not stop the others.
+    Read every page of the query, request each file once to mark the whole
+    set required, take the files that are ready, then come back for the rest
+    until they arrive or the attempts run out. A file that never arrives does
+    not stop the others.
     """
     args.identifier = [
         normalize_identifier(i) for i in identifiers
     ] or None
     query = _build_query(args)
     logger.info("Retrieving metadata for files to extract ...")
-    metadata_result = tapest_client.retrieve_metadata(config, query=query)
-    metadata_list = metadata_result.get("metadata", [])
+    metadata_list = _retrieve_all_metadata(config, query)
 
     if not metadata_list:
         logger.info("No files match the specified criteria")
