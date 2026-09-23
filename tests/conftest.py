@@ -155,7 +155,7 @@ def requests_fx(monkeypatch):
 
         return _fake
 
-    for method in ("get", "put", "delete", "post", "patch"):
+    for method in ("get", "put", "delete", "post", "patch", "head"):
         monkeypatch.setattr(
             f"tapest_client.client.requests.{method}", _make_fake(method)
         )

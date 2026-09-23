@@ -670,20 +670,51 @@ def extract_file(
 
 def _write_extracted_file(
     config: Config,
-    response: requests.Response,
     file_metadata: dict,
     local_file_pathname: str,
+    headers: dict,
 ) -> None:
     """Write the response body to disk and verify size and checksum.
 
     Clean up and raise if the file does not match its metadata.
     """
-    identifier = file_metadata["identifier"]
-    path = Path(local_file_pathname)
+
+    chunk_size = 1024
+    path = Path(local_file_pathname + ".part")
     path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "wb") as f:
-        for chunk in response.iter_content(chunk_size=8192):
-            f.write(chunk)
+    if path.exists():
+        size = path.stat().st_size
+        # Overwrite last partial chunk + one full chunk
+        start_range = (
+            (size - (size % chunk_size)) // chunk_size - 1
+            if size // chunk_size > 0
+            else 0
+        )
+        mode = "r+b"
+    else:
+        start_range = 0
+        mode = "wb"
+
+    identifier = file_metadata["identifier"]
+    url = _file_url(config, identifier)
+    verify_ssl = _verify_param(config)
+
+    with open(path, mode) as f:
+        f.seek(start_range * chunk_size)
+        for i in range(start_range, file_metadata["size"] // chunk_size + 1):
+            start_byte = i*chunk_size
+            end_byte = (i+1)*(chunk_size) - 1
+            headers["Range"] = f"bytes={start_byte}-{end_byte}"
+            response = requests.get(
+                url, headers=headers, stream=True, verify=verify_ssl
+            )
+            if response.status_code in [200, 206]:
+                for chunk in response.iter_content(chunk_size=8192):
+                    f.write(chunk)
+        
+    # Rename partfile
+    path.rename(str(path)[:-5])
+    path = Path(str(path)[:-5])
 
     actual_size = path.stat().st_size
     if actual_size != file_metadata["size"]:
@@ -736,12 +767,10 @@ def attempt_extract(
     headers = _build_headers(config, account_name=account_name)
     verify_ssl = _verify_param(config)
 
-    response = requests.get(
-        url, headers=headers, stream=True, verify=verify_ssl
-    )
+    response = requests.head(url, headers=headers, verify=verify_ssl)
     if response.status_code == 200:
         _write_extracted_file(
-            config, response, file_metadata, local_file_pathname
+            config, file_metadata, local_file_pathname, headers
         )
         return True, 0
     if response.status_code == 202:
@@ -750,7 +779,7 @@ def attempt_extract(
     cleanup_file(config, local_file_pathname)
     raise TapestClientError(
         f"Failed to extract file {identifier}: "
-        f"{response.status_code} {response.text}"
+        f"{response.status_code}"
     )
 
 
