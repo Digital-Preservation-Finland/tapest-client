@@ -42,7 +42,6 @@ CLIENT_CONFIG_DEFAULT = Config(
 # -- Shared fixtures ---------------------------------------------------------
 
 CONFIG_PARAMS = {
-    "host": ["https://ice.local", "https://tapest.local"],
     "verify_ssl": [True, False],
     "ca_cert_path": ["", "/etc/pki/tls/ca-bundle.pem"],
 }
