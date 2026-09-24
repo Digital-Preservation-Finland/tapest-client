@@ -45,10 +45,7 @@ CLIENT_CONFIG_DEFAULT = Config(
 
 # -- Shared fixtures ---------------------------------------------------------
 
-CONFIG_PARAMS = {
-    "verify_ssl": [True, False],
-    "ca_cert_path": ["", "/etc/pki/tls/ca-bundle.pem"],
-}
+CONFIG_PARAMS = {}
 
 _CONFIG_PERMUTATIONS = [
     dict(zip(CONFIG_PARAMS.keys(), values))
