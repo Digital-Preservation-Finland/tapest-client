@@ -40,7 +40,7 @@ SAMPLE_METADATA = {
     "identifier": "/pkg/file.dat",
     "size": 11,
     "checksum": (
-        "sha256:b94d27b9934d3e08a52e52d7da7dab" "fac484efe37a5380ee9088f7ace2efcde9"
+        "sha256:b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9"
     ),
     "created": "2025-01-01T00:00:00Z",
     "modified": "2025-06-01T12:00:00Z",
@@ -220,6 +220,19 @@ def test_extract_with_metadata_success(tmp_path, config_fx, requests_fx):
     dest = tmp_path / "out.dat"
     requests_fx.responses["get"] = _download_response()
     result = extract_file_with_metadata(config_fx(), SAMPLE_METADATA, str(dest))
+    assert result == SAMPLE_METADATA
+    assert dest.read_bytes() == b"hello world"
+
+
+def test_partial_extract_with_metadata_success(tmp_path, config_fx, requests_fx):
+    """Successful extract writes file and returns metadata."""
+    dest = tmp_path / "out.dat"
+    partfile = tmp_path / "out.dat.part"
+    partfile.write_text("hell")
+    requests_fx.responses["get"] = _download_response()
+    result = extract_file_with_metadata(config_fx(), SAMPLE_METADATA, str(dest))
+    assert not partfile.exists()
+    assert requests_fx.calls["get"]["headers"]["Range"] == 'bytes=0-10'
     assert result == SAMPLE_METADATA
     assert dest.read_bytes() == b"hello world"
 
