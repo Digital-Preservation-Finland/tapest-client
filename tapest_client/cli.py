@@ -162,8 +162,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     sub.add_argument(
         "--no-wait",
-        dest="wait",
-        action="store_false",
+        action="store_true",
         help="take only the files that are cached now and exit; by default "
         "wait for files on tape until none arrives in extract_timeout "
         "seconds",
@@ -488,19 +487,21 @@ def _extract_to_file(
     path = Path(dest)
     if not _should_extract(file_metadata, path, args.force):
         return
-    _, unavailable = _collect_files(config, [(file_metadata, path)], args.wait)
+    _, unavailable = _collect_files(
+        config, [(file_metadata, path)], no_wait=args.no_wait
+    )
     if unavailable:
-        if args.wait:
-            limit = _poll_limit(config, [(file_metadata, path)])
-            raise TapestClientError(
-                f"File {identifier} unavailable after {limit} s",
-                exit_code=117,
+        if args.no_wait:
+            logger.warning(
+                "File %s not yet available; re-run extract to fetch it",
+                identifier,
             )
-        logger.warning(
-            "File %s not yet available; re-run extract to fetch it",
-            identifier,
+            return
+        limit = _poll_limit(config, [(file_metadata, path)])
+        raise TapestClientError(
+            f"File {identifier} unavailable after {limit} s",
+            exit_code=117,
         )
-        return
     logger.info(
         "Successfully extracted file with identifier '%s' to "
         "local pathname '%s'",
@@ -584,7 +585,9 @@ def _extract_to_directory(
         except FileAlreadyExistsError:
             conflicts.append(str(path))
 
-    extracted_count, unavailable = _collect_files(config, pending, args.wait)
+    extracted_count, unavailable = _collect_files(
+        config, pending, no_wait=args.no_wait
+    )
 
     if skipped_count:
         logger.warning(
@@ -601,7 +604,7 @@ def _extract_to_directory(
             ", ".join(conflicts),
         )
     if unavailable:
-        if args.wait:
+        if not args.no_wait:
             raise TapestClientError(
                 f"{len(unavailable)} file(s) unavailable: no file arrived "
                 f"in {_poll_limit(config, pending)} s"
@@ -634,14 +637,14 @@ def _poll_limit(config: Config, pending: list[tuple[dict, Path]]) -> int:
 def _collect_files(
     config: Config,
     pending: list[tuple[dict, Path]],
-    wait: bool = True,
+    no_wait: bool = False,
 ) -> tuple[int, list[str]]:
     """Poll the service for the bytes, taking each file as it is ready.
 
-    The files are already marked required by the up-front bulk call.
-    With ``wait`` the polling gives up when no file arrives in
-    :func:`_poll_limit` seconds; without it there is one pass. Return the
-    count extracted and the identifiers that never came.
+    The files are already marked required by the up-front bulk call. The
+    polling gives up when no file arrives in :func:`_poll_limit` seconds.
+    With ``no_wait`` there is only one pass. Return the count extracted and
+    the identifiers that never came.
     """
     default_duration = max(1, config.default_sleep_duration)
     limit = _poll_limit(config, pending)
@@ -663,7 +666,7 @@ def _collect_files(
                 still_pending.append((file_metadata, path))
                 sleep_seconds = max(sleep_seconds, retry_after)
         pending = still_pending
-        if not pending or not wait:
+        if not pending or no_wait:
             break
         remaining = deadline - time.monotonic()
         if remaining <= 0:

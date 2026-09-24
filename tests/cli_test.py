@@ -192,6 +192,13 @@ def test_ingest_has_no_force_option():
         build_parser().parse_args(["ingest", "--force", "/path/a.dat"])
 
 
+def test_extract_no_wait_flag():
+    """--no-wait sets no_wait, the name the extract handlers read."""
+    parse = build_parser().parse_args
+    assert parse(["extract", "/a", "x"]).no_wait is False
+    assert parse(["extract", "--no-wait", "/a", "x"]).no_wait is True
+
+
 # -- Handlers -----------------------------------------------------------------
 
 
@@ -266,7 +273,7 @@ def test_extract_one_identifier_to_a_file(tmp_path, config_fx, cli_fx, capsys):
     cli_fx("retrieve_file_metadata", return_value=metadata)
     cli_fx("attempt_extract", return_value=(True, 0))
     args = SimpleNamespace(
-        args=["/id", str(dest)], prefix=None, force=False, wait=True,
+        args=["/id", str(dest)], prefix=None, force=False, no_wait=False,
     )
     _run_extract(config_fx(), args)
     assert cli_fx.calls["attempt_extract"] == [
@@ -290,7 +297,7 @@ def test_extract_one_identifier_leaves_a_matching_file(
     cli_fx("retrieve_file_metadata", return_value=metadata)
     cli_fx("attempt_extract")
     args = SimpleNamespace(
-        args=["/id", str(dest)], prefix=None, force=False, wait=True,
+        args=["/id", str(dest)], prefix=None, force=False, no_wait=False,
     )
     _run_extract(config_fx(), args)
     assert cli_fx.calls["attempt_extract"] == []
@@ -315,7 +322,7 @@ def test_extract_one_identifier_no_wait_reports_not_available(
         "tapest_client.cli.tapest_client.attempt_extract", _attempt
     )
     args = SimpleNamespace(
-        args=["/id", str(dest)], prefix=None, force=False, wait=False,
+        args=["/id", str(dest)], prefix=None, force=False, no_wait=True,
     )
     _run_extract(config_fx(), args)  # exits cleanly, no 117
 
@@ -789,7 +796,7 @@ def test_extract_no_wait_is_one_pass(
         "tapest_client.cli.tapest_client.attempt_extract", _attempt
     )
 
-    _run_extract(config_fx(), _extract_args(tmp_path, wait=False))
+    _run_extract(config_fx(), _extract_args(tmp_path, no_wait=True))
 
     assert attempts == ["/a", "/b"]  # one pass only
     assert [record["identifier"] for record in _jsonl(capsys)] == ["/a"]
@@ -887,7 +894,7 @@ def _extract_args(dest, **overrides):
         args=[str(dest)],
         prefix=["pfx"],
         force=False,
-        wait=True,
+        no_wait=False,
     )
     defaults.update(overrides)
     return SimpleNamespace(**defaults)
