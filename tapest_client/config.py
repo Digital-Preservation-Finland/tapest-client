@@ -37,6 +37,7 @@ Example config file (``/etc/tapest-client/client.conf``)::
         "storage_account_name": "ida",
         "max_retry_attempts": 10,
         "default_sleep_duration": 120,
+        "extract_timeout": 7200,
         "cleanup_on_fail": false,
         "verify_ssl": true,
         "ca_cert_path": ""
@@ -83,6 +84,8 @@ class Config:
     storage_account_name: str = ""
     max_retry_attempts: int = 10
     default_sleep_duration: int = 120
+    # Seconds an extract waits for the next file to come from tape.
+    extract_timeout: int = 7200
     cleanup_on_fail: bool = False
     verify_ssl: bool = True
     ca_cert_path: str = ""

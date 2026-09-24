@@ -15,12 +15,14 @@ from tusclient.exceptions import TusCommunicationError
 from tapest_client import client
 from tapest_client.client import (
     _tus_storage_path,
+    TAPE_READ_BYTES_PER_SECOND,
     FileAlreadyExistsError,
     TapestClientError,
     ingest_file,
     recache_file,
     extract_file,
     extract_file_with_metadata,
+    extract_time_limit,
     attempt_extract,
     delete_file,
     retrieve_file_metadata,
@@ -245,23 +247,64 @@ def test_extract_with_metadata_checksum_mismatch(tmp_path, config_fx, requests_f
         extract_file_with_metadata(config_fx(), meta, str(dest))
 
 
-def test_extract_with_metadata_retry_202(tmp_path, config_fx, requests_fx):
-    """202 Retry-After triggers retry; succeeds on second attempt."""
+def test_extract_with_metadata_retry_202(
+    tmp_path, config_fx, requests_fx, clock_fx
+):
+    """202 triggers a retry after Retry-After; succeeds on second attempt."""
     dest = tmp_path / "out.dat"
     requests_fx.responses["get"] = [
-        mock_response(202, headers={"Retry-After": "0"}),
+        mock_response(202, headers={"Retry-After": "7"}),
         _download_response(),
     ]
-    result = extract_file_with_metadata(config_fx(), SAMPLE_METADATA, str(dest))
+    result = extract_file_with_metadata(
+        config_fx(extract_timeout=60), SAMPLE_METADATA, str(dest)
+    )
     assert result == SAMPLE_METADATA
+    assert clock_fx.sleeps == [7]
 
 
-def test_extract_with_metadata_max_attempts(tmp_path, config_fx, requests_fx):
-    """Raises after exhausting all retry attempts on repeated 202."""
+def test_extract_with_metadata_times_out(
+    tmp_path, config_fx, requests_fx, clock_fx
+):
+    """Repeated 202 raises 117 once extract_timeout has passed. The last
+    sleep is cut to the time left, so no attempt is made after the limit."""
     dest = tmp_path / "out.dat"
-    requests_fx.responses["get"] = mock_response(202, headers={"Retry-After": "0"})
-    with pytest.raises(TapestClientError, match="file unavailable after"):
-        extract_file_with_metadata(config_fx(), SAMPLE_METADATA, str(dest))
+    requests_fx.responses["get"] = mock_response(
+        202, headers={"Retry-After": "40"}
+    )
+    with pytest.raises(
+        TapestClientError, match="file unavailable after 100 s"
+    ) as exc_info:
+        extract_file_with_metadata(
+            config_fx(extract_timeout=100), SAMPLE_METADATA, str(dest)
+        )
+    assert exc_info.value.exit_code == 117
+    assert clock_fx.sleeps == [40, 40, 20]
+    assert clock_fx.now == 100
+
+
+def test_extract_with_metadata_zero_timeout_is_one_attempt(
+    tmp_path, config_fx, requests_fx, clock_fx
+):
+    """extract_timeout 0 makes exactly one attempt and does not sleep."""
+    dest = tmp_path / "out.dat"
+    requests_fx.responses["get"] = mock_response(202)
+    with pytest.raises(TapestClientError, match="after 0 s"):
+        extract_file_with_metadata(
+            config_fx(extract_timeout=0), SAMPLE_METADATA, str(dest)
+        )
+    assert len(requests_fx.all_calls["get"]) == 1
+    assert clock_fx.sleeps == []
+
+
+def test_extract_time_limit_covers_large_file(config_fx):
+    """The limit is at least the time to read the largest file from tape."""
+    config = config_fx(extract_timeout=100)
+    small = {"size": 10}
+    large = {"size": 500 * TAPE_READ_BYTES_PER_SECOND}
+    assert extract_time_limit(config, [small]) == 100
+    assert extract_time_limit(config, [small, large, {"size": None}]) == 500
+    assert extract_time_limit(config, []) == 100
 
 
 def test_extract_with_metadata_http_error_cleans_up(tmp_path, config_fx, requests_fx):

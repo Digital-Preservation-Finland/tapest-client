@@ -8,6 +8,12 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 ## Unreleased
 
 ### Changed
+- An extract of files on tape waits until no file arrives in
+  `extract_timeout` seconds (default 7200). Each file that arrives starts the
+  wait again, and the wait is at least the time to read the largest file.
+  Before, the extract stopped after `max_retry_attempts` requests, which was
+  90 seconds with a Retry-After of 10 seconds. `max_retry_attempts` now
+  applies only to ingest and recache uploads.
 - **Breaking:** The library functions process one file. `ingest_files` and
   `extract_files_to_directory` are removed. Loop over `ingest_file` or
   `extract_file_with_metadata` in your own code. Thus the error handling of

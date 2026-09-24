@@ -64,8 +64,9 @@ Config file format (JSON):
 | `token`                  | string | `""`    | API token for authentication. Replace with your own token.                                                             |
 | `host`                   | string | `""`    | TapeSt API host URL.                                                                                                   |
 | `storage_account_name`   | string | `""`    | Account name used for storage operations. Only needed for agent accounts; leave empty for storage client accounts.     |
-| `max_retry_attempts`     | int    | `10`    | Maximum number of retry attempts for API calls.                                                                        |
-| `default_sleep_duration` | int    | `120`   | Sleep duration (seconds) between retries.                                                                              |
+| `max_retry_attempts`     | int    | `10`    | Maximum number of retry attempts when an ingest or recache upload gets 202.                                            |
+| `default_sleep_duration` | int    | `120`   | Sleep duration (seconds) between retries when the service gives no Retry-After.                                        |
+| `extract_timeout`        | int    | `7200`  | Seconds an extract waits for the next file to come from tape. Each file that arrives starts the wait again.            |
 | `cleanup_on_fail`        | bool   | `false` | Remove local files on failed operations.                                                                               |
 | `verify_ssl`             | bool   | `true`  | Verify the SSL certificate of the host. Do *not* change this except for testing purposes.                              |
 | `ca_cert_path`           | string | `""`    | Path to a CA certificate bundle (PEM). When set, overrides the default certifi bundle. Leave empty to use the default. |

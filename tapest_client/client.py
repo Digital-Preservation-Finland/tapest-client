@@ -29,6 +29,7 @@
 #     config.storage_account_name     # optional
 #     config.max_retry_attempts       # optional (default: 10)
 #     config.default_sleep_duration   # optional (default: 120)
+#     config.extract_timeout          # optional (default: 7200)
 #     config.cleanup_on_fail          # optional (default: False)
 #     config.verify_ssl               # optional (default: True)
 #     config.ca_cert_path             # optional (default: "")
@@ -64,6 +65,10 @@ from tusclient.exceptions import (
 from tusclient.storage import filestorage
 
 from tapest_client.config import Config
+
+# A low estimate of the tape read rate. An extract waits at least this long
+# for one file to be read.
+TAPE_READ_BYTES_PER_SECOND = 100 * 10**6
 
 TIMESTAMP_FORMAT = "%Y-%m-%dT%H:%M:%SZ"
 _CHUNK_SIZE_UNITS = {
@@ -741,6 +746,16 @@ def attempt_extract(
     )
 
 
+def extract_time_limit(config: Config, metadata_list: list[dict]) -> int:
+    """Return the seconds to wait for the next file of a set to arrive.
+
+    This is ``config.extract_timeout``, but not less than the time to read
+    the largest file from tape.
+    """
+    largest = max((fm.get("size") or 0 for fm in metadata_list), default=0)
+    return max(config.extract_timeout, largest // TAPE_READ_BYTES_PER_SECOND)
+
+
 def extract_file_with_metadata(
     config: Config,
     file_metadata: dict,
@@ -749,8 +764,9 @@ def extract_file_with_metadata(
 ) -> dict:
     """Extract a file using provided metadata to a local path.
 
-    Retries a file that is still on tape (202) up to
-    ``config.max_retry_attempts`` times and sleeps between attempts.
+    Retries a file that is still on tape (202) until
+    :func:`extract_time_limit` seconds have passed, and sleeps between
+    attempts.
 
     See :func:`ingest_file` for the semantics of ``account_name``.
     """
@@ -761,22 +777,26 @@ def extract_file_with_metadata(
         )
 
     identifier = file_metadata["identifier"]
-    max_attempts = max(1, config.max_retry_attempts)
+    limit = extract_time_limit(config, [file_metadata])
+    deadline = time.monotonic() + limit
     default_duration = max(1, config.default_sleep_duration)
 
-    for _ in range(max_attempts):
+    while True:
         ready, retry_after = attempt_extract(
             config, file_metadata, local_file_pathname,
             account_name=account_name,
         )
         if ready:
             return file_metadata
-        time.sleep(retry_after or default_duration)
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
+        time.sleep(min(retry_after or default_duration, remaining))
 
     cleanup_file(config, local_file_pathname)
     raise TapestClientError(
         f"Failed to extract file {identifier}: "
-        f"file unavailable after {max_attempts} attempts",
+        f"file unavailable after {limit} s",
         exit_code=117,
     )
 

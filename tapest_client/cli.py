@@ -164,10 +164,10 @@ def build_parser() -> argparse.ArgumentParser:
         "--wait",
         choices=["poll", "none", "forever"],
         default="poll",
-        help="how long to wait for files still on tape: 'poll' retries a "
-        "bounded number of times then gives up (default); 'none' takes only "
-        "what is cached now and exits; 'forever' polls until the whole set "
-        "arrives",
+        help="how long to wait for files still on tape: 'poll' gives up "
+        "when no file arrives in extract_timeout seconds (default); 'none' "
+        "takes only what is cached now and exits; 'forever' polls until the "
+        "whole set arrives",
     )
     sub.set_defaults(func=_run_extract)
 
@@ -492,9 +492,9 @@ def _extract_to_file(
     _, unavailable = _collect_files(config, [(file_metadata, path)], args.wait)
     if unavailable:
         if args.wait == "poll":
+            limit = _poll_limit(config, [(file_metadata, path)])
             raise TapestClientError(
-                f"File {identifier} unavailable after "
-                f"{max(1, config.max_retry_attempts)} attempts",
+                f"File {identifier} unavailable after {limit} s",
                 exit_code=117,
             )
         logger.warning(
@@ -604,8 +604,8 @@ def _extract_to_directory(
     if unavailable:
         if args.wait == "poll":
             raise TapestClientError(
-                f"{len(unavailable)} file(s) unavailable after "
-                f"{max(1, config.max_retry_attempts)} attempts"
+                f"{len(unavailable)} file(s) unavailable: no file arrived "
+                f"in {_poll_limit(config, pending)} s"
                 + (
                     f" ({len(conflicts)} more differ from the record)"
                     if conflicts
@@ -627,6 +627,11 @@ def _extract_to_directory(
         )
 
 
+def _poll_limit(config: Config, pending: list[tuple[dict, Path]]) -> int:
+    """Return the seconds 'poll' waits for the next of the pending files."""
+    return tapest_client.extract_time_limit(config, [fm for fm, _ in pending])
+
+
 def _collect_files(
     config: Config,
     pending: list[tuple[dict, Path]],
@@ -635,26 +640,17 @@ def _collect_files(
     """Poll the service for the bytes, taking each file as it is ready.
 
     The files are already marked required by the up-front bulk call.
-    ``wait`` bounds the polling: 'poll' retries ``max_retry_attempts`` times
-    then gives up, 'none' makes one pass, 'forever' polls until nothing is
-    pending. Return the count extracted and the identifiers that never came.
+    ``wait`` bounds the polling: 'poll' gives up when no file arrives in
+    :func:`_poll_limit` seconds, 'none' makes one pass, 'forever' polls until
+    nothing is pending. Return the count extracted and the identifiers that
+    never came.
     """
     default_duration = max(1, config.default_sleep_duration)
-    if wait == "none":
-        max_attempts = 1
-    elif wait == "forever":
-        max_attempts = None
-    else:
-        max_attempts = max(1, config.max_retry_attempts)
+    limit = _poll_limit(config, pending)
+    deadline = time.monotonic() + limit
     extracted_count = 0
-    sleep_seconds = 0
-    attempt = 0
 
     while pending:
-        if max_attempts is not None and attempt >= max_attempts:
-            break
-        if attempt:
-            time.sleep(sleep_seconds or default_duration)
         still_pending = []
         sleep_seconds = 0
         for file_metadata, path in pending:
@@ -664,11 +660,20 @@ def _collect_files(
             if ready:
                 _print_jsonl(file_metadata)
                 extracted_count += 1
+                deadline = time.monotonic() + limit
             else:
                 still_pending.append((file_metadata, path))
                 sleep_seconds = max(sleep_seconds, retry_after)
         pending = still_pending
-        attempt += 1
+        if not pending or wait == "none":
+            break
+        sleep_seconds = sleep_seconds or default_duration
+        if wait == "poll":
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            sleep_seconds = min(sleep_seconds, remaining)
+        time.sleep(sleep_seconds)
 
     return extracted_count, [fm["identifier"] for fm, _ in pending]
 

@@ -3,6 +3,7 @@
 import dataclasses
 import itertools
 import re
+import time
 import types
 
 import pytest
@@ -36,6 +37,7 @@ CLIENT_CONFIG_DEFAULT = Config(
     storage_account_name="testaccount",
     max_retry_attempts=2,
     default_sleep_duration=0,
+    extract_timeout=0,
     verify_ssl=True,
 )
 
@@ -74,6 +76,24 @@ def config_fx(request):
         return dataclasses.replace(base, **overrides)
 
     return _make
+
+
+@pytest.fixture
+def clock_fx(monkeypatch):
+    """Replace ``time.monotonic`` and ``time.sleep`` with a fake clock.
+
+    A sleep moves the clock forward and does not wait. ``clock_fx.now`` is
+    the current time and ``clock_fx.sleeps`` lists each sleep.
+    """
+    clock = types.SimpleNamespace(now=0.0, sleeps=[])
+
+    def _sleep(seconds):
+        clock.sleeps.append(seconds)
+        clock.now += seconds
+
+    monkeypatch.setattr(time, "monotonic", lambda: clock.now)
+    monkeypatch.setattr(time, "sleep", _sleep)
+    return clock
 
 
 def mock_response(status_code, json_data=None, text="", headers=None, content=None):

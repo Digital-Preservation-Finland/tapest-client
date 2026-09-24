@@ -825,6 +825,60 @@ def test_extract_wait_forever_polls_past_attempt_cap(
     assert [record["identifier"] for record in _jsonl(capsys)] == ["/a"]
 
 
+def test_extract_poll_deadline_restarts_on_arrival(
+    tmp_path, config_fx, cli_fx, monkeypatch, clock_fx
+):
+    """Each arrival restarts the wait, so a slow recall that keeps making
+    progress finishes although it takes longer than extract_timeout."""
+    cli_fx("mark_required", return_value=_MARKED)
+    cli_fx(
+        "retrieve_metadata",
+        return_value={
+            "metadata": [{"identifier": "/a"}, {"identifier": "/b"}]
+        },
+    )
+    arrivals = {"/a": 90, "/b": 180}
+
+    def _attempt(config, file_metadata, path):
+        return clock_fx.now >= arrivals[file_metadata["identifier"]], 10
+
+    monkeypatch.setattr(
+        "tapest_client.cli.tapest_client.attempt_extract", _attempt
+    )
+
+    # /b arrives 90 s after /a, inside the restarted limit; no 117.
+    _run_extract(
+        config_fx(extract_timeout=100), _extract_args(tmp_path)
+    )
+
+    assert clock_fx.now == 180
+
+
+def test_extract_poll_gives_up_when_nothing_arrives(
+    tmp_path, config_fx, cli_fx, monkeypatch, clock_fx
+):
+    """With no arrival for extract_timeout seconds, poll raises 117. The last
+    sleep is cut to the time left."""
+    cli_fx("mark_required", return_value=_MARKED)
+    cli_fx(
+        "retrieve_metadata",
+        return_value={"metadata": [{"identifier": "/a"}]},
+    )
+    monkeypatch.setattr(
+        "tapest_client.cli.tapest_client.attempt_extract",
+        lambda config, file_metadata, path: (False, 40),
+    )
+
+    with pytest.raises(TapestClientError) as exc_info:
+        _run_extract(
+            config_fx(extract_timeout=100), _extract_args(tmp_path)
+        )
+
+    assert exc_info.value.exit_code == 117
+    assert "no file arrived in 100 s" in str(exc_info.value)
+    assert clock_fx.sleeps == [40, 40, 20]
+
+
 def _extract_args(dest, **overrides):
     """Build an extract args namespace for a destination directory."""
     defaults = dict(
