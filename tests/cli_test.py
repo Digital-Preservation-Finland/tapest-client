@@ -266,7 +266,7 @@ def test_extract_one_identifier_to_a_file(tmp_path, config_fx, cli_fx, capsys):
     cli_fx("retrieve_file_metadata", return_value=metadata)
     cli_fx("attempt_extract", return_value=(True, 0))
     args = SimpleNamespace(
-        args=["/id", str(dest)], prefix=None, force=False, wait="poll",
+        args=["/id", str(dest)], prefix=None, force=False, wait=True,
     )
     _run_extract(config_fx(), args)
     assert cli_fx.calls["attempt_extract"] == [
@@ -290,18 +290,18 @@ def test_extract_one_identifier_leaves_a_matching_file(
     cli_fx("retrieve_file_metadata", return_value=metadata)
     cli_fx("attempt_extract")
     args = SimpleNamespace(
-        args=["/id", str(dest)], prefix=None, force=False, wait="poll",
+        args=["/id", str(dest)], prefix=None, force=False, wait=True,
     )
     _run_extract(config_fx(), args)
     assert cli_fx.calls["attempt_extract"] == []
     assert capsys.readouterr().out == ""
 
 
-def test_extract_one_identifier_wait_none_reports_not_available(
+def test_extract_one_identifier_no_wait_reports_not_available(
     tmp_path, config_fx, cli_fx, monkeypatch
 ):
-    """--wait applies to a single file too: 'none' takes one pass and exits 0
-    when the file is still on tape."""
+    """--no-wait applies to a single file too: one pass, and exit 0 when the
+    file is still on tape."""
     metadata = {"identifier": "/id", "size": 1, "checksum": "sha256:x"}
     dest = tmp_path / "out.dat"
     cli_fx("retrieve_file_metadata", return_value=metadata)
@@ -315,7 +315,7 @@ def test_extract_one_identifier_wait_none_reports_not_available(
         "tapest_client.cli.tapest_client.attempt_extract", _attempt
     )
     args = SimpleNamespace(
-        args=["/id", str(dest)], prefix=None, force=False, wait="none",
+        args=["/id", str(dest)], prefix=None, force=False, wait=False,
     )
     _run_extract(config_fx(), args)  # exits cleanly, no 117
 
@@ -771,10 +771,10 @@ def test_extract_capacity_refusal_stops_before_download(
     assert cli_fx.calls["retrieve_metadata"] == []
 
 
-def test_extract_wait_none_is_one_pass(
+def test_extract_no_wait_is_one_pass(
     tmp_path, config_fx, cli_fx, monkeypatch, capsys
 ):
-    """--wait none makes a single pass: take what is cached, report the rest,
+    """--no-wait makes a single pass: take what is cached, report the rest,
     and exit 0 (no 117)."""
     metadata = [{"identifier": "/a"}, {"identifier": "/b"}]
     cli_fx("mark_required", return_value=_MARKED)
@@ -789,39 +789,9 @@ def test_extract_wait_none_is_one_pass(
         "tapest_client.cli.tapest_client.attempt_extract", _attempt
     )
 
-    _run_extract(config_fx(), _extract_args(tmp_path, wait="none"))
+    _run_extract(config_fx(), _extract_args(tmp_path, wait=False))
 
     assert attempts == ["/a", "/b"]  # one pass only
-    assert [record["identifier"] for record in _jsonl(capsys)] == ["/a"]
-
-
-def test_extract_wait_forever_polls_past_attempt_cap(
-    tmp_path, config_fx, cli_fx, monkeypatch, capsys
-):
-    """--wait forever keeps polling until the whole set arrives, past
-    max_retry_attempts."""
-    cli_fx("mark_required", return_value=_MARKED)
-    cli_fx(
-        "retrieve_metadata",
-        return_value={"metadata": [{"identifier": "/a"}]},
-    )
-    monkeypatch.setattr("tapest_client.cli.time.sleep", lambda _s: None)
-    tries = {"n": 0}
-
-    def _attempt(config, file_metadata, path):
-        tries["n"] += 1
-        return tries["n"] >= 3, 0  # ready only on the third pass
-
-    monkeypatch.setattr(
-        "tapest_client.cli.tapest_client.attempt_extract", _attempt
-    )
-
-    _run_extract(
-        config_fx(max_retry_attempts=2),
-        _extract_args(tmp_path, wait="forever"),
-    )
-
-    assert tries["n"] == 3  # kept going past the cap of 2
     assert [record["identifier"] for record in _jsonl(capsys)] == ["/a"]
 
 
@@ -879,13 +849,45 @@ def test_extract_poll_gives_up_when_nothing_arrives(
     assert clock_fx.sleeps == [40, 40, 20]
 
 
+def test_extract_poll_sleeps_at_least_one_second(
+    tmp_path, config_fx, cli_fx, monkeypatch, clock_fx
+):
+    """With no Retry-After and default_sleep_duration 0, poll still sleeps
+    1 s between passes, so it does not send requests in a tight loop."""
+    cli_fx("mark_required", return_value=_MARKED)
+    cli_fx(
+        "retrieve_metadata",
+        return_value={"metadata": [{"identifier": "/a"}]},
+    )
+    calls = []
+
+    def _attempt(config, file_metadata, path):
+        calls.append(clock_fx.now)
+        # Without the floor the fake clock never moves; stop the loop.
+        assert len(calls) < 10, "tight loop"
+        return False, 0
+
+    monkeypatch.setattr(
+        "tapest_client.cli.tapest_client.attempt_extract", _attempt
+    )
+
+    with pytest.raises(TapestClientError):
+        _run_extract(
+            config_fx(default_sleep_duration=0, extract_timeout=3),
+            _extract_args(tmp_path),
+        )
+
+    assert clock_fx.sleeps == [1, 1, 1]
+    assert calls == [0, 1, 2, 3]  # the last attempt is at the deadline
+
+
 def _extract_args(dest, **overrides):
     """Build an extract args namespace for a destination directory."""
     defaults = dict(
         args=[str(dest)],
         prefix=["pfx"],
         force=False,
-        wait="poll",
+        wait=True,
     )
     defaults.update(overrides)
     return SimpleNamespace(**defaults)

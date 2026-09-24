@@ -122,23 +122,26 @@ tapest-client ingest --identifier /path/to/identifier /local/file.dat
 ### Extract (download)
 
 ```
-tapest-client extract FILE_ID [FILE_ID ...] DEST [--next FILE_ID] [--skip] [--force]
-tapest-client extract --prefix PFX DEST [--skip] [--force]
+tapest-client extract FILE_ID [FILE_ID ...] DEST [--force] [--no-wait]
+tapest-client extract --prefix PFX DEST [--force] [--no-wait]
 ```
 
 The last argument is the destination. It is a file when one identifier is
 given and the destination is not a directory that exists. In each other
 case it is a directory.
 
-`--next` gives the identifier of the file to read next. The service uses
-it for the order of the tape.
+A file that is on tape only must be read back into the cache first. By
+default, extract waits for these files. It stops when no file arrives in
+`extract_timeout` seconds, and then exits with code 117. With `--no-wait`,
+extract takes only the files that are in the cache now and exits with code 0.
+Run the command again later to get the other files.
 
 Examples:
 
 ```
 tapest-client extract /path/to/identifier /local/output.dat
 tapest-client extract /data/a.dat /data/b.dat /local/dir
-tapest-client extract --prefix /data /local/dir --skip
+tapest-client extract --prefix /data /local/dir --no-wait
 ```
 
 ### Delete
@@ -223,10 +226,11 @@ tapest-client ingest --prefix acme some_dir | jq -r .identifier
 
 ### Batch option flags
 
-| Flag      | `ingest`                                  | `extract`                           |
-|-----------|-------------------------------------------|-------------------------------------|
-| `--skip`  | Do not send a file that is stored already | Keep a local file that matches      |
-| `--force` | not available                             | Overwrite a local file that differs |
+| Flag        | `ingest`                                  | `extract`                                                  |
+|-------------|-------------------------------------------|------------------------------------------------------------|
+| `--skip`    | Do not send a file that is stored already | not available (a local file that matches is always kept)   |
+| `--force`   | not available                             | Overwrite a local file that differs                        |
+| `--no-wait` | not available                             | Take only the files that are in the cache now              |
 
 An identifier that has been used is not free again, not even after `delete`, so
 `ingest` cannot replace a stored file. A local file that differs from the stored

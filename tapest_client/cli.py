@@ -161,13 +161,12 @@ def build_parser() -> argparse.ArgumentParser:
         "files are always left as they are)",
     )
     sub.add_argument(
-        "--wait",
-        choices=["poll", "none", "forever"],
-        default="poll",
-        help="how long to wait for files still on tape: 'poll' gives up "
-        "when no file arrives in extract_timeout seconds (default); 'none' "
-        "takes only what is cached now and exits; 'forever' polls until the "
-        "whole set arrives",
+        "--no-wait",
+        dest="wait",
+        action="store_false",
+        help="take only the files that are cached now and exit; by default "
+        "wait for files on tape until none arrives in extract_timeout "
+        "seconds",
     )
     sub.set_defaults(func=_run_extract)
 
@@ -477,8 +476,8 @@ def _extract_to_file(
     """Extract one file to a target file name.
 
     Skip an existing identical file; --force overwrites one that differs, and
-    a file that differs without --force is an error. --wait bounds the wait
-    for a file still on tape, the same as for a directory.
+    a file that differs without --force is an error. --no-wait takes the file
+    only if it is cached now, the same as for a directory.
     """
     logger.info(
         "Extracting file with identifier '%s' to local pathname '%s' ...",
@@ -491,7 +490,7 @@ def _extract_to_file(
         return
     _, unavailable = _collect_files(config, [(file_metadata, path)], args.wait)
     if unavailable:
-        if args.wait == "poll":
+        if args.wait:
             limit = _poll_limit(config, [(file_metadata, path)])
             raise TapestClientError(
                 f"File {identifier} unavailable after {limit} s",
@@ -542,8 +541,8 @@ def _extract_to_directory(
 
     Mark the whole matched set required in one call, then read each file as
     it becomes available. Already-present identical files are left as they
-    are. A file that never arrives does not stop the others. ``--wait``
-    decides how long to wait for files on tape.
+    are. A file that never arrives does not stop the others. With
+    ``--no-wait`` only the files that are cached now are taken.
     """
     args.identifier = [
         normalize_identifier(i) for i in identifiers
@@ -602,7 +601,7 @@ def _extract_to_directory(
             ", ".join(conflicts),
         )
     if unavailable:
-        if args.wait == "poll":
+        if args.wait:
             raise TapestClientError(
                 f"{len(unavailable)} file(s) unavailable: no file arrived "
                 f"in {_poll_limit(config, pending)} s"
@@ -628,22 +627,21 @@ def _extract_to_directory(
 
 
 def _poll_limit(config: Config, pending: list[tuple[dict, Path]]) -> int:
-    """Return the seconds 'poll' waits for the next of the pending files."""
+    """Return the seconds to wait for the next of the pending files."""
     return tapest_client.extract_time_limit(config, [fm for fm, _ in pending])
 
 
 def _collect_files(
     config: Config,
     pending: list[tuple[dict, Path]],
-    wait: str = "poll",
+    wait: bool = True,
 ) -> tuple[int, list[str]]:
     """Poll the service for the bytes, taking each file as it is ready.
 
     The files are already marked required by the up-front bulk call.
-    ``wait`` bounds the polling: 'poll' gives up when no file arrives in
-    :func:`_poll_limit` seconds, 'none' makes one pass, 'forever' polls until
-    nothing is pending. Return the count extracted and the identifiers that
-    never came.
+    With ``wait`` the polling gives up when no file arrives in
+    :func:`_poll_limit` seconds; without it there is one pass. Return the
+    count extracted and the identifiers that never came.
     """
     default_duration = max(1, config.default_sleep_duration)
     limit = _poll_limit(config, pending)
@@ -665,15 +663,12 @@ def _collect_files(
                 still_pending.append((file_metadata, path))
                 sleep_seconds = max(sleep_seconds, retry_after)
         pending = still_pending
-        if not pending or wait == "none":
+        if not pending or not wait:
             break
-        sleep_seconds = sleep_seconds or default_duration
-        if wait == "poll":
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                break
-            sleep_seconds = min(sleep_seconds, remaining)
-        time.sleep(sleep_seconds)
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
+        time.sleep(min(sleep_seconds or default_duration, remaining))
 
     return extracted_count, [fm["identifier"] for fm, _ in pending]
 
