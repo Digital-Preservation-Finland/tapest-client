@@ -485,7 +485,9 @@ def test_tus_upload(tmp_path, config_fx):
 def test_tus_failure_reports_the_server_detail(
     tmp_path, config_fx, mock_tus_endpoints
 ):
-    """A refused chunk reaches the caller with the server's detail."""
+    """A refused chunk reaches the caller with the server's detail. The
+    resume state stays so that the upload can be run again.
+    """
     path = tmp_path / "big.dat"
     path.write_bytes(b"x" * 64)
     mock_tus_endpoints.patch(
@@ -508,6 +510,27 @@ def test_tus_failure_reports_the_server_detail(
         "Failed to upload /big.dat: Upload-Offset must be 32, the current "
         "offset of the resource, got 0"
     )
+    assert _tus_storage_path("/big.dat").exists()
+
+
+def test_tus_conflict_over_a_chunk_drops_the_resume_state(
+    tmp_path, config_fx, mock_tus_endpoints
+):
+    """A conflict can surface over a chunk. The resume state is removed: a
+    resumed upload would look complete and skip the finalize.
+    """
+    path = tmp_path / "big.dat"
+    path.write_bytes(b"x" * 64)
+    mock_tus_endpoints.patch(
+        re.compile(f"^{config_fx().host}/tus"),
+        json={"detail": "A file already exists"},
+        status_code=409,
+    )
+    with pytest.raises(TapestClientError, match="A file already exists"):
+        _tus_upload_file(
+            config=config_fx(), identifier="/big.dat", path=str(path)
+        )
+    assert not _tus_storage_path("/big.dat").exists()
 
 
 def test_tus_failure_that_is_not_a_conflict_is_left_as_it_is(

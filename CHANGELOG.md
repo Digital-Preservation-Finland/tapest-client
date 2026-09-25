@@ -5,6 +5,30 @@ All notable changes to this project are in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+### Changed
+- **Breaking:** `ingest_file` and `recache_file` use the TUS protocol only. The
+  HTTP PUT method is removed. A file that fits in one request goes as a single
+  TUS creation-with-upload POST. A larger file goes in chunks. The parameter
+  `use_tus` of `recache_file` is removed.
+
+### Added
+- The configuration field `tus_creation_with_upload_max_size` gives the
+  largest file that goes as one creation-with-upload POST. A larger file goes
+  in chunks. The default is 1 GiB. The environment value
+  `TAPEST_CLIENT_TUS_CREATION_WITH_UPLOAD_MAX_SIZE` gives the same result.
+
+### Removed
+- **Breaking:** The client no longer reads `max_non_tus_upload_bytes` from the
+  status. The API does not send it. The upload path no longer depends on a
+  limit from the server.
+
+### Fixed
+- A chunked upload that ends in a conflict (409) removes its resume state.
+  Before, the next run resumed the upload as complete, the server did not
+  ingest the file, and the client returned the metadata that the server had.
+
 ## 0.0.12 - 2026-09-30
 
 ### Added
@@ -59,21 +83,6 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 - The results of `ingest` and `extract` are the files that the client sent. A
   file that the client leaves as it is has a line in the log, not a record in
   the output.
-- **Breaking:** `ingest_file` and `recache_file` use the TUS protocol only. The
-  HTTP PUT method is removed. A file that fits in one request goes as a single
-  TUS creation-with-upload POST. A larger file goes in chunks. The parameter
-  `use_tus` of `recache_file` is removed.
-
-### Added
-- The configuration field `tus_creation_with_upload_max_size` gives the
-  largest file that goes as one creation-with-upload POST. A larger file goes
-  in chunks. The default is 1 GiB. The environment value
-  `TAPEST_CLIENT_TUS_CREATION_WITH_UPLOAD_MAX_SIZE` gives the same result.
-
-### Removed
-- **Breaking:** The client no longer reads `max_non_tus_upload_bytes` from the
-  status. The API does not send it. The upload path no longer depends on a
-  limit from the server.
 
 ### Fixed
 - `ingest --identifier ID PATH` uses `--skip`, and `extract FILE_ID DEST` uses

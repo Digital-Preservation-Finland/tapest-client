@@ -306,6 +306,15 @@ def _conflict_error_document(error: TusCommunicationError) -> dict | None:
     return document if isinstance(document, dict) else None
 
 
+def _is_offset_refusal(error: TusCommunicationError) -> bool:
+    """Whether a failure is a chunk that the server refused at its offset."""
+    document = _conflict_error_document(error) or {}
+    return (
+        error.status_code == 409
+        and document.get("error") == "upload_offset_mismatch"
+    )
+
+
 def _raise_for_upload_error(
     error: TusCommunicationError, identifier: str
 ) -> None:
@@ -373,6 +382,10 @@ def _tus_upload(
     try:
         uploader.upload()
     except TusCommunicationError as error:
+        if error.status_code == 409 and not _is_offset_refusal(error):
+            # The conflict ends this upload. A kept URL would resume it as
+            # complete on the next run and skip the finalize.
+            storage_path.unlink(missing_ok=True)
         _raise_for_upload_error(error=error, identifier=identifier)
     storage_path.unlink(missing_ok=True)
     return retrieve_file_metadata(
@@ -380,6 +393,31 @@ def _tus_upload(
         identifier=identifier,
         account_name=account_name,
     )
+
+
+def _ingest_metadata(
+    identifier: str, path: str, checksum: str | None = None
+) -> tuple[int, dict]:
+    """Return the size of a local file and its ingest Upload-Metadata.
+
+    File-identity metadata travels in the TUS Upload-Metadata, so it is
+    captured once on POST initialization and persisted by the server.
+    """
+    stat = Path(path).stat()
+    if checksum is None:
+        checksum = generate_checksum(local_file_pathname=path)
+    created = datetime.fromtimestamp(stat.st_ctime, timezone.utc).strftime(
+        TIMESTAMP_FORMAT
+    )
+    modified = datetime.fromtimestamp(stat.st_mtime, timezone.utc).strftime(
+        TIMESTAMP_FORMAT
+    )
+    return stat.st_size, {
+        "filename": normalize_identifier(identifier=identifier),
+        "X-TAPEST-Checksum": checksum,
+        "X-TAPEST-Created": created,
+        "X-TAPEST-Modified": modified,
+    }
 
 
 def _tus_upload_file(
@@ -402,28 +440,12 @@ def _tus_upload_file(
     :param chunk_size: Size of chunks to send as part of TUS upload.
         Falls back to ``config.tus_chunk_size`` if unset.
     """
-    stat = Path(path).stat()
-    if checksum is None:
-        checksum = generate_checksum(local_file_pathname=path)
-    created = datetime.fromtimestamp(stat.st_ctime, timezone.utc).strftime(
-        TIMESTAMP_FORMAT
-    )
-    modified = datetime.fromtimestamp(stat.st_mtime, timezone.utc).strftime(
-        TIMESTAMP_FORMAT
-    )
-    # File-identity metadata travels in the TUS Upload-Metadata, so it is
-    # captured once on POST initialization and persisted by the server.
-    metadata = {
-        "filename": normalize_identifier(identifier=identifier),
-        "X-TAPEST-Checksum": checksum,
-        "X-TAPEST-Created": created,
-        "X-TAPEST-Modified": modified,
-    }
+    size, metadata = _ingest_metadata(identifier, path, checksum)
     return _tus_upload(
         config=config,
         identifier=identifier,
         path=path,
-        size=stat.st_size,
+        size=size,
         metadata=metadata,
         account_name=account_name,
         chunk_size=chunk_size,
@@ -508,44 +530,6 @@ def _tus_create_with_upload(
     )
 
 
-def _tus_create_with_upload_file(
-    config: Config,
-    identifier: str,
-    path: str,
-    checksum: str | None = None,
-    account_name: str | None = None,
-) -> dict | None:
-    """Build the ingest Upload-Metadata from a local file, then send it as a
-    single TUS creation-with-upload POST.
-
-    See :func:`_tus_create_with_upload` for the return value (``None`` on a
-    413 that asks the caller to fall back to chunked TUS).
-    """
-    stat = Path(path).stat()
-    if checksum is None:
-        checksum = generate_checksum(local_file_pathname=path)
-    created = datetime.fromtimestamp(stat.st_ctime, timezone.utc).strftime(
-        TIMESTAMP_FORMAT
-    )
-    modified = datetime.fromtimestamp(stat.st_mtime, timezone.utc).strftime(
-        TIMESTAMP_FORMAT
-    )
-    metadata = {
-        "filename": normalize_identifier(identifier=identifier),
-        "X-TAPEST-Checksum": checksum,
-        "X-TAPEST-Created": created,
-        "X-TAPEST-Modified": modified,
-    }
-    return _tus_create_with_upload(
-        config=config,
-        identifier=identifier,
-        path=path,
-        size=stat.st_size,
-        metadata=metadata,
-        account_name=account_name,
-    )
-
-
 def ingest_file(
     config: Config,
     identifier: str,
@@ -573,17 +557,17 @@ def ingest_file(
     :param account_name: Per-call override for ``X-TAPEST-Account``.
         Falls back to ``config.storage_account_name`` if unset.
     """
-    path = Path(local_file_pathname)
-    stat = path.stat()
-    if checksum is None:
-        checksum = generate_checksum(local_file_pathname=path)
+    size, metadata = _ingest_metadata(
+        identifier, local_file_pathname, checksum
+    )
 
-    if stat.st_size <= _creation_with_upload_max(config):
-        result = _tus_create_with_upload_file(
+    if size <= _creation_with_upload_max(config):
+        result = _tus_create_with_upload(
             config=config,
             identifier=identifier,
             path=local_file_pathname,
-            checksum=checksum,
+            size=size,
+            metadata=metadata,
             account_name=account_name,
         )
         if result is not None:
@@ -592,7 +576,7 @@ def ingest_file(
         config=config,
         identifier=identifier,
         path=local_file_pathname,
-        checksum=checksum,
+        checksum=metadata["X-TAPEST-Checksum"],
         account_name=account_name,
     )
 
