@@ -91,6 +91,8 @@ class Config:
     ca_cert_path: str = ""
     # Size of one chunk of a TUS upload, e.g. "16 MiB" or "500 MiB".
     tus_chunk_size: str = "16 MiB"
+    # Size of one chunk when extracting files, e.g. "128 MiB" or "512 MiB".
+    download_chunk_size: str = "128 MiB"
     # Largest file sent as one creation-with-upload POST, e.g. "1 GiB".
     # A larger file uses chunked TUS.
     tus_creation_with_upload_max_size: str = "1 GiB"

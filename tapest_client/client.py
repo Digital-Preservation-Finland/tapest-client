@@ -679,7 +679,7 @@ def _write_extracted_file(
     Clean up and raise if the file does not match its metadata.
     """
 
-    chunk_size = parse_chunk_size(config.tus_chunk_size)
+    chunk_size = parse_chunk_size(config.download_chunk_size)
     tmpfile_suffix = ".tapest-client-tmpfile"
     path = Path(local_file_pathname + tmpfile_suffix)
     path.parent.mkdir(parents=True, exist_ok=True)
