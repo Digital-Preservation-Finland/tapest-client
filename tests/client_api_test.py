@@ -227,7 +227,7 @@ def test_extract_with_metadata_success(tmp_path, config_fx, requests_fx):
 def test_partial_extract_with_metadata_success(tmp_path, config_fx, requests_fx):
     """Successful extract writes file and returns metadata."""
     dest = tmp_path / "out.dat"
-    partfile = tmp_path / "out.dat.part"
+    partfile = tmp_path / "out.dat.tapest-client-tmpfile"
     partfile.write_text("hell")
     requests_fx.responses["get"] = _download_response()
     result = extract_file_with_metadata(config_fx(), SAMPLE_METADATA, str(dest))

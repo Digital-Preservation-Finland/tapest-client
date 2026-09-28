@@ -680,7 +680,8 @@ def _write_extracted_file(
     """
 
     chunk_size = 1024
-    path = Path(local_file_pathname + ".part")
+    tmpfile_suffix = ".tapest-client-tmpfile"
+    path = Path(local_file_pathname + tmpfile_suffix)
     path.parent.mkdir(parents=True, exist_ok=True)
     if path.exists():
         size = path.stat().st_size
@@ -714,8 +715,8 @@ def _write_extracted_file(
                     f.write(chunk)
         
     # Rename partfile
-    path.rename(str(path)[:-5])
-    path = Path(str(path)[:-5])
+    path.rename(str(path)[:-len(tmpfile_suffix)])
+    path = Path(str(path)[:-len(tmpfile_suffix)])
 
     actual_size = path.stat().st_size
     if actual_size != file_metadata["size"]:
