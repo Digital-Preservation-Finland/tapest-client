@@ -250,11 +250,13 @@ def test_extract_with_metadata_size_mismatch_cleans_up(
 ):
     """Size mismatch removes file when cleanup_on_fail is set."""
     dest = tmp_path / "out.dat"
+    partfile = tmp_path / "out.dat.tapest-client-tmpfile"
     meta = {**SAMPLE_METADATA, "size": 99999}
     requests_fx.responses["get"] = _download_response()
     with pytest.raises(TapestClientError, match="size"):
         extract_file_with_metadata(config_fx(cleanup_on_fail=True), meta, str(dest))
     assert not dest.exists()
+    assert not partfile.exists()
 
 
 def test_extract_with_metadata_checksum_mismatch(tmp_path, config_fx, requests_fx):
@@ -331,11 +333,14 @@ def test_extract_time_limit_covers_large_file(config_fx):
 def test_extract_with_metadata_http_error_cleans_up(tmp_path, config_fx, requests_fx):
     """HTTP error removes partial file when cleanup_on_fail is set."""
     dest = tmp_path / "out.dat"
+    partfile = tmp_path / "out.dat.tapest-client-tmpfile"
     requests_fx.responses["head"] = mock_response(500)
     with pytest.raises(TapestClientError, match="500"):
         extract_file_with_metadata(
             config_fx(cleanup_on_fail=True), SAMPLE_METADATA, str(dest)
         )
+    assert not dest.exists()
+    assert not partfile.exists()
 
 
 def test_attempt_extract_ready(tmp_path, config_fx, requests_fx):
