@@ -5,9 +5,25 @@ All notable changes to this project are in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## Unreleased
+## 0.0.12 - 2026-09-30
+
+### Added
+- `query-metadata` reads the listing one page at a time. `--limit` is the page
+  size, `--desc` reverses the order, and `--page-token` takes the
+  `nextPageToken` of the previous page. The table view shows the child
+  directories and the next page token.
+- `extract --no-wait` takes only the files that are cached now and exits.
+- `status` reports `tapest_client_version` next to the version of the API.
 
 ### Changed
+- `extract` of several files or a directory marks the whole set for recall
+  with one `POST /recall`, then downloads each file when it is cached. Before,
+  it marked one file, waited for it, and then marked the next, so the service
+  could not batch the recall. A directory extract follows `nextPageToken`, so
+  it takes every file of a large directory.
+- **Breaking:** `query-metadata --order` accepts only `identifier` and
+  `ingested`, as the API does. `storage`, `stored`, `checked` and `recached`
+  are removed.
 - An extract of files on tape waits until no file arrives in
   `extract_timeout` seconds (default 7200). Each file that arrives starts the
   wait again, and the wait is at least the time to read the largest file.
@@ -47,6 +63,10 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 - `ingest --identifier ID PATH` uses `--skip`, and `extract FILE_ID DEST` uses
   `--skip` and `--force`. Before, these options gave no result for one named
   file.
+- A TUS chunk that the server refuses at its offset is reported as a refused
+  offset. Before, every 409 was reported as a taken identifier.
+- The table view of `query-metadata` prints `storage_metadata` as it is.
+  Before, it was encoded to JSON a second time.
 
 ## 0.0.11 - 2026-08-18
 
