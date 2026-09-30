@@ -41,6 +41,7 @@ CLIENT_CONFIG_DEFAULT = Config(
     default_sleep_duration=0,
     extract_timeout=0,
     verify_ssl=True,
+    partfile_suffix=".tapest-client-partfile",
 )
 
 # -- Shared fixtures ---------------------------------------------------------

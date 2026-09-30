@@ -93,6 +93,9 @@ class Config:
     tus_chunk_size: str = "16 MiB"
     # Size of one chunk when extracting files, e.g. "128 MiB" or "512 MiB".
     download_chunk_size: str = "128 MiB"
+    # Suffix used for partial downloads. These files will be used to continue
+    # download where previous connection died if present.
+    partfile_suffix: str = ".tapest-client-partfile"
     # Largest file sent as one creation-with-upload POST, e.g. "1 GiB".
     # A larger file uses chunked TUS.
     tus_creation_with_upload_max_size: str = "1 GiB"

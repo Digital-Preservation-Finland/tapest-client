@@ -680,8 +680,8 @@ def _write_extracted_file(
     """
 
     chunk_size = parse_chunk_size(config.download_chunk_size)
-    tmpfile_suffix = ".tapest-client-tmpfile"
-    path = Path(local_file_pathname + tmpfile_suffix)
+    partfile_suffix = config.partfile_suffix
+    path = Path(local_file_pathname + partfile_suffix)
     path.parent.mkdir(parents=True, exist_ok=True)
     if path.exists():
         size = path.stat().st_size
@@ -713,10 +713,10 @@ def _write_extracted_file(
             if response.status_code in [200, 206]:
                 for chunk in response.iter_content(chunk_size=8192):
                     f.write(chunk)
-        
+
     # Rename partfile
-    path.rename(str(path)[:-len(tmpfile_suffix)])
-    path = Path(str(path)[:-len(tmpfile_suffix)])
+    path.rename(str(path)[:-len(partfile_suffix)])
+    path = Path(str(path)[:-len(partfile_suffix)])
 
     actual_size = path.stat().st_size
     if actual_size != file_metadata["size"]:

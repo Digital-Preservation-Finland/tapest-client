@@ -227,7 +227,7 @@ def test_extract_with_metadata_success(tmp_path, config_fx, requests_fx):
 def test_partial_extract_with_metadata_success(tmp_path, config_fx, requests_fx):
     """Successful extract writes file and returns metadata."""
     dest = tmp_path / "out.dat"
-    partfile = tmp_path / "out.dat.tapest-client-tmpfile"
+    partfile = tmp_path / "out.dat.tapest-client-partfile"
     partfile.write_text("hell")
     requests_fx.responses["get"] = _download_response()
     result = extract_file_with_metadata(config_fx(), SAMPLE_METADATA, str(dest))
@@ -250,7 +250,7 @@ def test_extract_with_metadata_size_mismatch_cleans_up(
 ):
     """Size mismatch removes file when cleanup_on_fail is set."""
     dest = tmp_path / "out.dat"
-    partfile = tmp_path / "out.dat.tapest-client-tmpfile"
+    partfile = tmp_path / "out.dat.tapest-client-partfile"
     meta = {**SAMPLE_METADATA, "size": 99999}
     requests_fx.responses["get"] = _download_response()
     with pytest.raises(TapestClientError, match="size"):
@@ -333,7 +333,7 @@ def test_extract_time_limit_covers_large_file(config_fx):
 def test_extract_with_metadata_http_error_cleans_up(tmp_path, config_fx, requests_fx):
     """HTTP error removes partial file when cleanup_on_fail is set."""
     dest = tmp_path / "out.dat"
-    partfile = tmp_path / "out.dat.tapest-client-tmpfile"
+    partfile = tmp_path / "out.dat.tapest-client-partfile"
     requests_fx.responses["head"] = mock_response(500)
     with pytest.raises(TapestClientError, match="500"):
         extract_file_with_metadata(
