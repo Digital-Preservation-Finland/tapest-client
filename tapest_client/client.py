@@ -58,10 +58,7 @@ from collections.abc import Callable
 from platformdirs import user_state_path
 import requests
 from tusclient import client as tus_client
-from tusclient.exceptions import (
-    TusCommunicationError,
-    TusUploadFailed,
-)
+from tusclient.exceptions import TusCommunicationError
 from tusclient.storage import filestorage
 
 from tapest_client.config import Config
@@ -280,7 +277,7 @@ def _tus_storage_path(identifier: str) -> Path:
 
 
 def _conflict_error_document(error: TusCommunicationError) -> dict | None:
-    """Return the JSON error document of a 409, or None if it carried none."""
+    """Return the JSON error document of a failure, or None if it had none."""
     if not isinstance(error.response_content, (bytes, str)):
         return None
     try:
@@ -293,27 +290,18 @@ def _conflict_error_document(error: TusCommunicationError) -> dict | None:
 def _raise_for_upload_error(
     error: TusCommunicationError, identifier: str
 ) -> None:
-    """Re-raise a failed upload as the condition its 409 reports.
+    """Re-raise a failed upload with the server's error message.
 
     Returns only for an identical duplicate, which is a success.
     """
-    document = _conflict_error_document(error)
-    # Only flask-tus-io answers 409 without a document, and only over a chunk.
-    refused_offset = document is None and isinstance(error, TusUploadFailed)
-    duplicate = (document or {}).get("error") == "identical_duplicate"
-    if error.status_code == 409 and refused_offset:
-        raise TapestClientError(
-            f"The server refused a chunk of {identifier} with 409. The "
-            f"chunk was probably sent at the wrong offset, so the upload "
-            f"can be run again."
-        ) from error
-    if error.status_code == 409 and duplicate:
+    document = _conflict_error_document(error) or {}
+    if document.get("error") == "identical_duplicate":
         return
-    if error.status_code == 409:
-        raise FileAlreadyExistsError(
-            f"A different file already exists for identifier {identifier}"
-        ) from error
-    raise error
+    if "detail" not in document:
+        raise error
+    raise TapestClientError(
+        f"Failed to upload {identifier}: {document['detail']}"
+    ) from error
 
 
 # === Core Operation Functions ===
@@ -395,8 +383,6 @@ def _tus_upload_file(
     :param path: local file URI.
     :param checksum: Pre-given checksum so that checksum calculation
         can be given during this function's call.
-    :raises FileAlreadyExistsError: If a different file is already stored
-        under the identifier. Replacing it is the caller's decision.
     :param account_name: Per-call override for ``X-TAPEST-Account``.
         Falls back to ``config.storage_account_name`` if unset.
     :param chunk_size: Size of chunks to send as part of TUS upload.
@@ -533,9 +519,6 @@ def ingest_file(
         if body.get("error") == "identical_duplicate":
             # Idempotent success: return the existing file's metadata.
             return body.get("metadata") or body
-        raise FileAlreadyExistsError(
-            f"File already exists with identifier {identifier}"
-        )
     # The service refused the body as too large; retry over TUS.
     if response.status_code == 413:
         return _tus_upload_file(

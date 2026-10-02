@@ -34,11 +34,12 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   `extract_files_to_directory` are removed. Loop over `ingest_file` or
   `extract_file_with_metadata` in your own code. Thus the error handling of
   one file is yours.
-- **Breaking:** `ingest_file` and `extract_file_with_metadata` raise
-  `FileAlreadyExistsError` when a different file has the identifier or the
-  local pathname. The class is a `TapestClientError` and also a builtin
-  `FileExistsError`. The parameter `raise_for_status` of `ingest_file` is
-  removed.
+- **Breaking:** `extract_file_with_metadata` raises `FileAlreadyExistsError`
+  when a file exists at the local pathname. The class is a
+  `TapestClientError` and also a builtin `FileExistsError`. A failed
+  `ingest_file` raises `TapestClientError` with the message of the server,
+  also when a different file has the identifier. The parameter
+  `raise_for_status` of `ingest_file` is removed.
 - The options `--skip` and `--force` are in the command-line client, not in the
   library. With `--skip` the command `ingest` reads the metadata of the file
   before the upload. Thus a file that is stored already is not sent again.

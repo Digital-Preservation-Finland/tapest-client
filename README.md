@@ -269,18 +269,18 @@ metadata = extract_file(config, "/path/to/file", "/local/path")
 
 ### Files that already exist
 
-`ingest_file` raises `FileAlreadyExistsError` when a different file has the
-identifier. The class is also a builtin `FileExistsError`. Your application
-decides what happens next.
+`ingest_file` raises `TapestClientError` with the message of the server when
+a different file has the identifier. Your application decides what happens
+next.
 
 ```python
-from tapest_client import FileAlreadyExistsError, ingest_file
+from tapest_client import TapestClientError, ingest_file
 
 for identifier, path in files:
     try:
         ingest_file(config, identifier, path)
-    except FileAlreadyExistsError:
-        logger.warning("Identifier %s is in use, file not sent", identifier)
+    except TapestClientError as error:
+        logger.warning("File %s not sent: %s", identifier, error)
 ```
 
 An identifier that has been used is not free again, not even after `delete_file`,
