@@ -703,7 +703,7 @@ def _write_extracted_file(
     with open(path, mode) as f:
         f.seek(start_range * chunk_size)
 
-        for i in range(start_range, file_metadata["size"] // chunk_size + 1):
+        for i in range(start_range, -(-file_metadata["size"] // chunk_size)):
             start_byte = i*chunk_size
             end_byte = min((i+1)*chunk_size-1, file_metadata["size"]-1)
             headers["Range"] = f"bytes={start_byte}-{end_byte}"
