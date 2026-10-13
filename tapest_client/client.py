@@ -710,9 +710,14 @@ def _write_extracted_file(
             response = requests.get(
                 url, headers=headers, stream=True, verify=verify_ssl
             )
-            if response.status_code in [200, 206]:
+            if response.status_code == 206:
                 for chunk in response.iter_content(chunk_size=8192):
                     f.write(chunk)
+            else:
+                raise TapestClientError(
+                    f"Failed to extract file {identifier}: "
+                    f"{response.status_code} {response.text}"
+                )
 
     # Rename partfile
     path.rename(str(path)[:-len(partfile_suffix)])

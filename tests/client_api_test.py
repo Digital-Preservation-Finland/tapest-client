@@ -61,8 +61,8 @@ SAMPLE_METADATA = {
 
 
 def _download_response(data=b"hello world"):
-    """Build a 200 response whose iter_content yields *data*."""
-    return mock_response(200, content=data)
+    """Build a 206 response whose iter_content yields *data*."""
+    return mock_response(206, content=data)
 
 
 # === ingest_file ===
@@ -344,7 +344,7 @@ def test_extract_with_metadata_http_error_cleans_up(tmp_path, config_fx, request
 
 
 def test_attempt_extract_ready(tmp_path, config_fx, requests_fx):
-    """A 200 writes the file and reports it ready."""
+    """A 206 writes the file and reports it ready."""
     dest = tmp_path / "out.dat"
     requests_fx.responses["get"] = _download_response()
     ready, retry_after = attempt_extract(
