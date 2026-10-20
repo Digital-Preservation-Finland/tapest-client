@@ -7,6 +7,8 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## Unreleased
 
+## 0.0.13 - 2026-10-20
+
 ### Changed
 - **Breaking:** `ingest_file` and `recache_file` use the TUS protocol only. The
   HTTP PUT method is removed. A file that fits in one request goes as a single
