@@ -668,21 +668,33 @@ def extract_file(
     )
 
 
-def _write_extracted_file(
+def attempt_extract(
     config: Config,
     file_metadata: dict,
     local_file_pathname: str,
-    headers: dict,
-) -> None:
-    """Write the response body to disk and verify size and checksum.
+    account_name: str | None = None,
+) -> tuple[bool, int]:
+    """Make one extract request.
 
-    Clean up and raise if the file does not match its metadata.
+    Return ``(True, 0)`` and write the file when the service gives the bytes
+    (200). Return ``(False, retry_after)`` when the file is still on tape
+    (202); ``retry_after`` is the server's Retry-After in seconds, or 0 when
+    it gives none. Clean up and raise for any other status.
+
+    A 202 makes the service mark the file required. A caller can request every
+    file once to mark a whole set, then come back for the bytes.
+
+    See :func:`ingest_file` for the semantics of ``account_name``.
     """
-
+    identifier = file_metadata["identifier"]
+    url = _file_url(config, identifier)
+    headers = _build_headers(config, account_name=account_name)
+    verify_ssl = _verify_param(config)
     chunk_size = parse_chunk_size(config.download_chunk_size)
     partfile_suffix = config.partfile_suffix
     path = Path(local_file_pathname + partfile_suffix)
     path.parent.mkdir(parents=True, exist_ok=True)
+
     if path.exists():
         size = path.stat().st_size
         # Overwrite last partial chunk + one full chunk
@@ -696,10 +708,6 @@ def _write_extracted_file(
         start_range = 0
         mode = "wb"
 
-    identifier = file_metadata["identifier"]
-    url = _file_url(config, identifier)
-    verify_ssl = _verify_param(config)
-
     with open(path, mode) as f:
         f.seek(start_range * chunk_size)
 
@@ -710,10 +718,14 @@ def _write_extracted_file(
             response = requests.get(
                 url, headers=headers, stream=True, verify=verify_ssl
             )
-            if response.status_code == 206:
+
+            if response.status_code == 202:
+                return False, int(response.headers.get("Retry-After", 0))
+            elif response.status_code == 206:
                 for chunk in response.iter_content(chunk_size=8192):
                     f.write(chunk)
             else:
+                cleanup_file(config, str(path))
                 raise TapestClientError(
                     f"Failed to extract file {identifier}: "
                     f"{response.status_code} {response.text}"
@@ -750,44 +762,7 @@ def _write_extracted_file(
     )
     os.utime(path, (created_ts, modified_ts))
 
-
-def attempt_extract(
-    config: Config,
-    file_metadata: dict,
-    local_file_pathname: str,
-    account_name: str | None = None,
-) -> tuple[bool, int]:
-    """Make one extract request.
-
-    Return ``(True, 0)`` and write the file when the service gives the bytes
-    (200). Return ``(False, retry_after)`` when the file is still on tape
-    (202); ``retry_after`` is the server's Retry-After in seconds, or 0 when
-    it gives none. Clean up and raise for any other status.
-
-    A 202 makes the service mark the file required. A caller can request every
-    file once to mark a whole set, then come back for the bytes.
-
-    See :func:`ingest_file` for the semantics of ``account_name``.
-    """
-    identifier = file_metadata["identifier"]
-    url = _file_url(config, identifier)
-    headers = _build_headers(config, account_name=account_name)
-    verify_ssl = _verify_param(config)
-
-    response = requests.head(url, headers=headers, verify=verify_ssl)
-    if response.status_code == 200:
-        _write_extracted_file(
-            config, file_metadata, local_file_pathname, headers
-        )
-        return True, 0
-    if response.status_code == 202:
-        return False, int(response.headers.get("Retry-After", 0))
-
-    cleanup_file(config, local_file_pathname)
-    raise TapestClientError(
-        f"Failed to extract file {identifier}: "
-        f"{response.status_code}"
-    )
+    return True, 0
 
 
 def extract_time_limit(config: Config, metadata_list: list[dict]) -> int:

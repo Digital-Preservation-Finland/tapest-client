@@ -273,11 +273,10 @@ def test_extract_with_metadata_retry_202(
 ):
     """202 triggers a retry after Retry-After; succeeds on second attempt."""
     dest = tmp_path / "out.dat"
-    requests_fx.responses["head"] = [
+    requests_fx.responses["get"] = [
         mock_response(202, headers={"Retry-After": "7"}),
-        mock_response(200),
+        _download_response(),
     ]
-    requests_fx.responses["get"] = _download_response()
     result = extract_file_with_metadata(
         config_fx(extract_timeout=60), SAMPLE_METADATA, str(dest)
     )
@@ -291,7 +290,7 @@ def test_extract_with_metadata_times_out(
     """Repeated 202 raises 117 once extract_timeout has passed. The last
     sleep is cut to the time left, so no attempt is made after the limit."""
     dest = tmp_path / "out.dat"
-    requests_fx.responses["head"] = mock_response(
+    requests_fx.responses["get"] = mock_response(
         202,
         headers={"Retry-After": "40"}
     )
@@ -311,12 +310,12 @@ def test_extract_with_metadata_zero_timeout_is_one_attempt(
 ):
     """extract_timeout 0 makes exactly one attempt and does not sleep."""
     dest = tmp_path / "out.dat"
-    requests_fx.responses["head"] = mock_response(202)
+    requests_fx.responses["get"] = mock_response(202)
     with pytest.raises(TapestClientError, match="after 0 s"):
         extract_file_with_metadata(
             config_fx(extract_timeout=0), SAMPLE_METADATA, str(dest)
         )
-    assert len(requests_fx.all_calls["head"]) == 1
+    assert len(requests_fx.all_calls["get"]) == 1
     assert clock_fx.sleeps == []
 
 
@@ -334,7 +333,7 @@ def test_extract_with_metadata_http_error_cleans_up(tmp_path, config_fx, request
     """HTTP error removes partial file when cleanup_on_fail is set."""
     dest = tmp_path / "out.dat"
     partfile = tmp_path / "out.dat.tapest-client-partfile"
-    requests_fx.responses["head"] = mock_response(500)
+    requests_fx.responses["get"] = mock_response(500)
     with pytest.raises(TapestClientError, match="500"):
         extract_file_with_metadata(
             config_fx(cleanup_on_fail=True), SAMPLE_METADATA, str(dest)
@@ -359,7 +358,7 @@ def test_attempt_extract_not_ready(tmp_path, config_fx, requests_fx):
     """A 202 reports not ready with the server's Retry-After and writes
     nothing, so a caller can mark the file and come back for it."""
     dest = tmp_path / "out.dat"
-    requests_fx.responses["head"] = mock_response(
+    requests_fx.responses["get"] = mock_response(
         202, headers={"Retry-After": "7"}
     )
     ready, retry_after = attempt_extract(
@@ -373,7 +372,6 @@ def test_attempt_extract_not_ready(tmp_path, config_fx, requests_fx):
 def test_extract_with_metadata_creates_parent_dirs(tmp_path, config_fx, requests_fx):
     """Missing parent directories are created automatically."""
     dest = tmp_path / "sub" / "dir" / "out.dat"
-    requests_fx.responses["head"] = mock_response(200)
     requests_fx.responses["get"] = _download_response()
     extract_file_with_metadata(config_fx(), SAMPLE_METADATA, str(dest))
     assert dest.exists()
