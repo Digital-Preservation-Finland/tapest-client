@@ -731,13 +731,9 @@ def attempt_extract(
                     f"{response.status_code} {response.text}"
                 )
 
-    # Rename partfile
-    path.rename(str(path)[:-len(partfile_suffix)])
-    path = Path(str(path)[:-len(partfile_suffix)])
-
     actual_size = path.stat().st_size
     if actual_size != file_metadata["size"]:
-        cleanup_file(config, local_file_pathname)
+        cleanup_file(config, str(path))
         raise TapestClientError(
             f"Failed to extract file {identifier}: "
             f"size {actual_size} != expected {file_metadata['size']}"
@@ -745,7 +741,7 @@ def attempt_extract(
 
     actual_checksum = generate_checksum(path)
     if actual_checksum != file_metadata["checksum"]:
-        cleanup_file(config, local_file_pathname)
+        cleanup_file(config, str(path))
         raise TapestClientError(
             f"Failed to extract file {identifier}: checksum mismatch"
         )
@@ -761,6 +757,9 @@ def attempt_extract(
         .timestamp()
     )
     os.utime(path, (created_ts, modified_ts))
+
+    # Rename partfile
+    path.rename(str(path)[:-len(partfile_suffix)])
 
     return True, 0
 
