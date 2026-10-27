@@ -739,6 +739,9 @@ def attempt_extract(
             f"size {actual_size} != expected {file_metadata['size']}"
         )
 
+    # Performance trade-off: Check actual bytes written to disk.
+    # In-flight checksum would be faster, but would not detect
+    # disk/controller related problems. Extra read for security.
     actual_checksum = generate_checksum(path)
     if actual_checksum != file_metadata["checksum"]:
         cleanup_file(config, str(path))
