@@ -690,46 +690,35 @@ def attempt_extract(
     url = _file_url(config, identifier)
     headers = _build_headers(config, account_name=account_name)
     verify_ssl = _verify_param(config)
-    chunk_size = parse_chunk_size(config.download_chunk_size)
     partfile_suffix = config.partfile_suffix
     path = Path(local_file_pathname + partfile_suffix)
     path.parent.mkdir(parents=True, exist_ok=True)
 
     if path.exists():
-        size = path.stat().st_size
-        # Overwrite last partial chunk + one full chunk
-        start_range = (
-            (size - (size % chunk_size)) // chunk_size - 1
-            if size // chunk_size > 0
-            else 0
-        )
-        mode = "r+b"
+        range_offset = path.stat().st_size
+        mode = "ab"
     else:
-        start_range = 0
+        range_offset = 0
         mode = "wb"
 
     with open(path, mode) as f:
-        f.seek(start_range * chunk_size)
 
-        for i in range(start_range, -(-file_metadata["size"] // chunk_size)):
-            start_byte = i*chunk_size
-            end_byte = min((i+1)*chunk_size-1, file_metadata["size"]-1)
-            headers["Range"] = f"bytes={start_byte}-{end_byte}"
-            response = requests.get(
-                url, headers=headers, stream=True, verify=verify_ssl
+        headers["Range"] = f"bytes={range_offset}-"
+        response = requests.get(
+            url, headers=headers, stream=True, verify=verify_ssl
+        )
+
+        if response.status_code == 202:
+            return False, int(response.headers.get("Retry-After", 0))
+        elif response.status_code == 206:
+            for chunk in response.iter_content(chunk_size=8192):
+                f.write(chunk)
+        else:
+            cleanup_file(config, str(path))
+            raise TapestClientError(
+                f"Failed to extract file {identifier}: "
+                f"{response.status_code} {response.text}"
             )
-
-            if response.status_code == 202:
-                return False, int(response.headers.get("Retry-After", 0))
-            elif response.status_code == 206:
-                for chunk in response.iter_content(chunk_size=8192):
-                    f.write(chunk)
-            else:
-                cleanup_file(config, str(path))
-                raise TapestClientError(
-                    f"Failed to extract file {identifier}: "
-                    f"{response.status_code} {response.text}"
-                )
 
     actual_size = path.stat().st_size
     if actual_size != file_metadata["size"]:

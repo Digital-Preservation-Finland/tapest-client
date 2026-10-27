@@ -229,10 +229,10 @@ def test_partial_extract_with_metadata_success(tmp_path, config_fx, requests_fx)
     dest = tmp_path / "out.dat"
     partfile = tmp_path / "out.dat.tapest-client-partfile"
     partfile.write_text("hell")
-    requests_fx.responses["get"] = _download_response()
+    requests_fx.responses["get"] = mock_response(206, content=b"o world")
     result = extract_file_with_metadata(config_fx(), SAMPLE_METADATA, str(dest))
     assert not partfile.exists()
-    assert requests_fx.calls["get"]["headers"]["Range"] == 'bytes=0-10'
+    assert requests_fx.calls["get"]["headers"]["Range"] == 'bytes=4-'
     assert result == SAMPLE_METADATA
     assert dest.read_bytes() == b"hello world"
 

@@ -91,8 +91,6 @@ class Config:
     ca_cert_path: str = ""
     # Size of one chunk of a TUS upload, e.g. "16 MiB" or "500 MiB".
     tus_chunk_size: str = "16 MiB"
-    # Size of one chunk when extracting files, e.g. "128 MiB" or "512 MiB".
-    download_chunk_size: str = "128 MiB"
     # Suffix used for partial downloads. These files will be used to continue
     # download where previous connection died if present.
     partfile_suffix: str = ".tapest-client-partfile"
