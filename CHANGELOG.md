@@ -7,6 +7,11 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## Unreleased
 
+## 0.0.14 - 2026-11-03
+
+### Changed
+- **Breaking:** Implement resumable download.
+
 ## 0.0.13 - 2026-10-20
 
 ### Changed
